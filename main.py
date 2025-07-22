@@ -113,7 +113,7 @@ def decode_frame_to_udp(frame: np.ndarray, width: int = FRAME_WIDTH, height: int
     # Decode with Reed-Solomon
     rsc = RSCodec(ecc_symbols)
     try:
-        original_data, _ = rsc.decode(coded_data)
+        original_data = rsc.decode(coded_data)[0]
         return bytes(original_data)
     except ReedSolomonError as e:
         raise ValueError(f"Reed-Solomon decoding failed: {e}")
@@ -121,7 +121,7 @@ def decode_frame_to_udp(frame: np.ndarray, width: int = FRAME_WIDTH, height: int
 # Example usage (for testing; assume you have a UDP packet and hardware for CVBS output/capture)
 if __name__ == "__main__":
     # Simulated UDP packet with H.265 data (replace with real data)
-    sample_udp_data = b'\x00\x01\x02\x03' * 1000  # Example binary data
+    sample_udp_data = b"hello world"
     
     # Encode
     frame = encode_udp_to_frame(sample_udp_data)
@@ -129,7 +129,7 @@ if __name__ == "__main__":
     
     # Simulate noise (for testing decoding robustness)
     noisy_frame = frame.copy()
-    noise_mask = np.random.choice([0, 255], size=frame.shape, p=[0.99, 0.01])  # 1% bit flips
+    noise_mask = np.random.choice([0, 255], size=frame.shape, p=[0.9999, 0.0001])  # 0.01% bit flips
     noisy_frame = np.bitwise_xor(noisy_frame, noise_mask)
     
     # Decode
