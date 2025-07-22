@@ -33,10 +33,14 @@ def encode_udp_to_frame(udp_data: bytes, width: int = FRAME_WIDTH, height: int =
     Returns:
         numpy.ndarray: Grayscale video frame (uint8) ready for CVBS output.
     """
+    if len(udp_data) > 65535:
+        raise ValueError("UDP data too large (max 65535 bytes)")
+
     rsc = RSCodec(ecc_symbols)
-    
+
     # Encode data with Reed-Solomon
-    coded_data = rsc.encode(udp_data)
+    payload = len(udp_data).to_bytes(2, "big") + udp_data
+    coded_data = rsc.encode(payload)
     
     # Convert to bit string
     bit_stream = ''.join(f'{byte:08b}' for byte in coded_data)
@@ -109,19 +113,23 @@ def decode_frame_to_udp(frame: np.ndarray, width: int = FRAME_WIDTH, height: int
     for i in range(0, len(data_bits) - (len(data_bits) % 8), 8):
         byte_str = data_bits[i:i+8]
         coded_data.append(int(byte_str, 2))
-    
-    # Decode with Reed-Solomon
-    rsc = RSCodec(ecc_symbols)
-    try:
-        original_data = rsc.decode(coded_data)[0]
-        return bytes(original_data)
-    except ReedSolomonError as e:
-        raise ValueError(f"Reed-Solomon decoding failed: {e}")
+
+        rsc = RSCodec(ecc_symbols)
+        try:
+            decoded, _, _ = rsc.decode(coded_data)
+            msg_len = int.from_bytes(decoded[:2], "big")
+            if msg_len <= len(decoded) - 2:
+                return bytes(decoded[2:2 + msg_len])
+        except ReedSolomonError:
+            continue
+
+    raise ValueError("Reed-Solomon decoding failed or length field invalid")
 
 # Example usage (for testing; assume you have a UDP packet and hardware for CVBS output/capture)
 if __name__ == "__main__":
     # Simulated UDP packet with H.265 data (replace with real data)
-    sample_udp_data = b"hello world"
+    with open('lol.jpg', 'rb') as file:
+        sample_udp_data = file.read()
     
     # Encode
     frame = encode_udp_to_frame(sample_udp_data)
@@ -136,5 +144,9 @@ if __name__ == "__main__":
     try:
         decoded_data = decode_frame_to_udp(noisy_frame)
         print(f"Decoded data matches original: {decoded_data == sample_udp_data}")
+        
+        with open("recovered.jpg", "wb") as out_file:
+            out_file.write(decoded_data)
+            
     except ValueError as e:
         print(f"Decoding error: {e}")
