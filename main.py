@@ -11,8 +11,29 @@ from reedsolo import RSCodec, ReedSolomonError
 FRAME_WIDTH = 720  # Typical NTSC/PAL width
 FRAME_HEIGHT = 480  # NTSC height (use 576 for PAL)
 ECC_SYMBOLS = 32   # Number of Reed-Solomon parity symbols (adjust for more/less error correction)
-SYNC_PATTERN = '01' * 128  # 256-bit alternating sync pattern for frame alignment
+SYNC_PATTERN = '1111100110101' * 3
 SYNC_LENGTH = len(SYNC_PATTERN)
+
+def find_sync_by_correlation(bit_stream: str, sync_pattern: str) -> int:
+    def to_signed_bit_vector(bits: str) -> list[int]:
+        return [1 if b == '1' else -1 for b in bits]
+
+    sync_vector = to_signed_bit_vector(sync_pattern)
+    window_size = len(sync_vector)
+    max_score = float('-inf')
+    best_position = -1
+
+    for i in range(len(bit_stream) - window_size + 1):
+        window = bit_stream[i:i + window_size]
+        window_vector = to_signed_bit_vector(window)
+
+        score = sum(s * w for s, w in zip(sync_vector, window_vector))
+        if score > max_score:
+            max_score = score
+            best_position = i
+
+    return best_position if max_score > 0.8 * window_size else -1
+
 
 def encode_udp_to_frame(udp_data: bytes, width: int = FRAME_WIDTH, height: int = FRAME_HEIGHT, ecc_symbols: int = ECC_SYMBOLS) -> np.ndarray:
     """
@@ -98,10 +119,10 @@ def decode_frame_to_udp(frame: np.ndarray, width: int = FRAME_WIDTH, height: int
         for x in range(width):
             pixel = frame[y, x]
             bit = '1' if pixel > 127 else '0'
-            bit_stream += bit
+            bit_stream += bit           
     
     # Find sync pattern
-    sync_pos = bit_stream.find(SYNC_PATTERN)
+    sync_pos = find_sync_by_correlation(bit_stream, SYNC_PATTERN)
     if sync_pos == -1:
         raise ValueError("Sync pattern not found in frame")
     
@@ -137,7 +158,7 @@ if __name__ == "__main__":
     
     # Simulate noise (for testing decoding robustness)
     noisy_frame = frame.copy()
-    noise_mask = np.random.choice([0, 255], size=frame.shape, p=[0.9999, 0.0001])  # 0.01% bit flips
+    noise_mask = np.random.choice([0, 255], size=frame.shape, p=[0.99, 0.01])  # 1% bit flips
     noisy_frame = np.bitwise_xor(noisy_frame, noise_mask)
     
     # Decode
