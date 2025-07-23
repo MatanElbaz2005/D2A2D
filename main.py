@@ -114,14 +114,14 @@ def decode_frame_to_udp(frame: np.ndarray, width: int = FRAME_WIDTH, height: int
         byte_str = data_bits[i:i+8]
         coded_data.append(int(byte_str, 2))
 
-        rsc = RSCodec(ecc_symbols)
-        try:
-            decoded, _, _ = rsc.decode(coded_data)
-            msg_len = int.from_bytes(decoded[:2], "big")
-            if msg_len <= len(decoded) - 2:
-                return bytes(decoded[2:2 + msg_len])
-        except ReedSolomonError:
-            continue
+    rsc = RSCodec(ecc_symbols)
+    try:
+        decoded, _, _ = rsc.decode(coded_data)
+        msg_len = int.from_bytes(decoded[:2], "big")
+        if msg_len <= len(decoded) - 2:
+            return bytes(decoded[2:2 + msg_len])
+    except ReedSolomonError:
+        raise ValueError("Reed-Solomon decoding failed or length field invalid")
 
     raise ValueError("Reed-Solomon decoding failed or length field invalid")
 
