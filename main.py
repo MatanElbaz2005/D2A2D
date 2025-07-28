@@ -169,13 +169,10 @@ if __name__ == "__main__":
             print(f"original: {w}×{h}")
 
             # resize to 320x240 if larger
-            TARGET_W, TARGET_H = 320, 240
-            if w > TARGET_W or h > TARGET_H:
-                frame_proc = cv2.resize(frame, (TARGET_W, TARGET_H))
-            else:
-                frame_proc = frame
+            TARGET_W, TARGET_H = 720, 480
+            frame_proc = cv2.resize(frame, (TARGET_W, TARGET_H))
 
-            encode_param = [cv2.IMWRITE_JPEG_QUALITY, 70]
+            encode_param = [cv2.IMWRITE_JPEG_QUALITY, 10]
             _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
             full_bytes = encoded_image.tobytes()
 
