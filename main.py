@@ -164,7 +164,19 @@ if __name__ == "__main__":
             success, frame = cap.read()
             if not success:
                 break
-            _, encoded_image = cv2.imencode(".jpg", frame)
+            # the original frame size
+            h, w = frame.shape[:2]
+            print(f"original: {w}×{h}")
+
+            # resize to 320x240 if larger
+            TARGET_W, TARGET_H = 320, 240
+            if w > TARGET_W or h > TARGET_H:
+                frame_proc = cv2.resize(frame, (TARGET_W, TARGET_H))
+            else:
+                frame_proc = frame
+
+            encode_param = [cv2.IMWRITE_JPEG_QUALITY, 70]
+            _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
             full_bytes = encoded_image.tobytes()
 
             MAX_PAYLOAD = 37600
