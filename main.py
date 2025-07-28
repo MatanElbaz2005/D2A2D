@@ -63,7 +63,9 @@ def encode_udp_to_frame(udp_data: bytes, width: int = FRAME_WIDTH, height: int =
 
     # Encode data with Reed-Solomon
     payload = len(udp_data).to_bytes(4, "big") + udp_data
+    print("Payload length:", len(payload), "bytes")
     coded_data = rsc.encode(payload)
+    print("Coded data length:", len(coded_data), "bytes")
     
     # Convert to bit string
     bit_stream = ''.join(f'{byte:08b}' for byte in coded_data)
@@ -88,7 +90,7 @@ def encode_udp_to_frame(udp_data: bytes, width: int = FRAME_WIDTH, height: int =
             bit = int(bit_stream[idx])
             frame[y, x] = 255 if bit else 0
             idx += 1
-    
+    print(total_bits / 8, "bits encoded into frame")
     return frame
 
 def decode_frame_to_udp(frame: np.ndarray, width: int = FRAME_WIDTH, height: int = FRAME_HEIGHT, ecc_symbols: int = ECC_SYMBOLS) -> bytes:
@@ -172,7 +174,7 @@ if __name__ == "__main__":
             TARGET_W, TARGET_H = 720, 480
             frame_proc = cv2.resize(frame, (TARGET_W, TARGET_H))
 
-            encode_param = [cv2.IMWRITE_JPEG_QUALITY, 10]
+            encode_param = [cv2.IMWRITE_JPEG_QUALITY, 75]
             _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
             full_bytes = encoded_image.tobytes()
 
