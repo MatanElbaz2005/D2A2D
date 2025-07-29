@@ -2,6 +2,8 @@ import numpy as np
 from reedsolo import RSCodec, ReedSolomonError
 from scipy import signal
 import cv2
+from webp_encdec import encode_frame_to_webp, decode_webp_to_frame
+import time
 
 # Config
 FRAME_WIDTH = 720
@@ -11,6 +13,7 @@ SYNC_PRBS_LENGTH = 63
 SYNC_PRBS_POLY = [6, 5]
 CHIP_LENGTH = 3
 DATA_PRBS_POLY = [2, 1]
+FORMAT_IMAGE = 'jpg'  # can be WEBP or JPG
 
 def generate_prbs(length: int, poly: list[int]) -> np.ndarray:
     degree = poly[0]
@@ -93,15 +96,22 @@ if __name__ == "__main__":
             break
         # the original frame size
         h, w = frame.shape[:2]
+        print("--------------------------------")
         print(f"original: {w}×{h}")
+        print("---------------------------------")
 
         # resize to 320x240 if larger
         TARGET_W, TARGET_H = 720, 480
         frame_proc = cv2.resize(frame, (TARGET_W, TARGET_H))
-
-        encode_param = [cv2.IMWRITE_JPEG_QUALITY, 30]
-        _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
-        full_bytes = encoded_image.tobytes()
+        start_time = time.time()
+        if FORMAT_IMAGE == 'jpg':
+            encode_param = [cv2.IMWRITE_JPEG_QUALITY, 30]
+            _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
+            full_bytes = encoded_image.tobytes()
+        elif FORMAT_IMAGE == 'webp':
+            encoded_image = encode_frame_to_webp(frame_proc, quality=30)
+            full_bytes = encoded_image
+        print(f"Encoding took" + str(time.time() - start_time))
         try:
             frame_bin = encode_udp_to_frame(full_bytes)
             cv2.imwrite(f"encoded_{frame_count}.png", frame_bin)
@@ -111,10 +121,17 @@ if __name__ == "__main__":
                                             p=[0.97, 0.03]).astype(np.uint8) # 3% bit flips
             noisy ^= noise_mask
             decoded_data = decode_frame_to_udp(noisy)
-            with open(f"recovered_{frame_count}.jpg", "wb") as out_file:
-                out_file.write(decoded_data)
-
+            start_decode_time = time.time()
+            if FORMAT_IMAGE == 'jpg':
+                with open(f"recovered_{frame_count}.jpg", "wb") as out_file:
+                    out_file.write(decoded_data)
+            elif FORMAT_IMAGE == 'webp':
+                decoded_frame = decode_webp_to_frame(decoded_data)
+                cv2.imwrite(f"recovered_{frame_count}.png", decoded_frame)
+            print("the decode took: " + str(time.time() - start_decode_time))
+            print("-------------------------------")
             print(f"Decoded matches: {decoded_data == full_bytes}")
+            print("-------------------------------")
 
         except ValueError as e:
             print(f"Error: {e}")
