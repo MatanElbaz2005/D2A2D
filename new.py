@@ -19,6 +19,7 @@ MEMORY = [6]
 G_MATRIX = [[0o133, 0o171]]
 TB_DEPTH = 15
 INTERLEAVER_ROWS = 8
+PATH_TO_VIDEO = r"C:\Users\matan\OneDrive\מסמכים\Matan\D2A2D\1572378-sd_960_540_24fps.mp4"
 
 
 def generate_prbs(length: int, poly: list[int]) -> np.ndarray:
@@ -113,7 +114,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
 
 # Example usage
 if __name__ == "__main__":
-    cap = cv2.VideoCapture(r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4")
+    cap = cv2.VideoCapture(PATH_TO_VIDEO)
     frame_count = 0
     while cap.isOpened() and frame_count < 4:
         frame_count += 1
@@ -144,7 +145,7 @@ if __name__ == "__main__":
             print(f"Encoded frame {frame_count} saved.")
             noisy = frame_bin.copy()
             noise_mask = np.random.choice([0, 255], size=noisy.shape,
-                                            p=[0.96, 0.04]).astype(np.uint8) # 3% bit flips
+                                            p=[0.97, 0.03]).astype(np.uint8) # 3% bit flips
             noisy ^= noise_mask
             decoded_data = decode_frame_to_udp(noisy)
             start_decode_time = time.time()
