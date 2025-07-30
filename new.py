@@ -54,6 +54,7 @@ def encode_udp_to_frame(udp_data: bytes) -> np.ndarray:
     """
     Encode UDP packet into a black/white frame with vectorized spread-spectrum.
     """
+    start_encoding_time = time.time()
     udp_data = len(udp_data).to_bytes(4, "big") + udp_data
     rsc = RSCodec(ECC_SYMBOLS)
     coded_rs = rsc.encode(udp_data)
@@ -79,12 +80,15 @@ def encode_udp_to_frame(udp_data: bytes) -> np.ndarray:
     # Vectorized padding
     full_stream = np.pad(full_stream, (0, total_pixels - len(full_stream)), 'constant')
     frame = full_stream.reshape((FRAME_HEIGHT, FRAME_WIDTH))
+    print("--------------------------------")
+    print("the encode took: " + str(time.time() - start_encoding_time) + "when USE_INTERLEAVER is " + str(USE_INTERLEAVER))
     return frame
 
 def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes:
     """
     Decode a noisy frame with vectorized despreading.
     """
+    start_decode_time = time.time()
     if frame.shape != (FRAME_HEIGHT, FRAME_WIDTH):
         raise ValueError(f"Frame size mismatch: expected {FRAME_HEIGHT}x{FRAME_WIDTH}")
     received_pm = 2 * (frame.ravel() > 127).astype(np.int32) - 1  # ±1, int32 for dot
@@ -115,6 +119,8 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
         else:
             decoded_data_with_length = bytes(rsc.decode(rx_bytes)[0])
         msg_len = int.from_bytes(decoded_data_with_length[:4], "big")
+        print("the decode took: " + str(time.time() - start_decode_time) + "when USE_INTERLEAVER is " + str(USE_INTERLEAVER))
+        print("--------------------------------")
         return decoded_data_with_length[4:4 + msg_len]
     except ReedSolomonError as e:
         raise ValueError(f"Decoding failed: {e}")
@@ -145,7 +151,7 @@ if __name__ == "__main__":
         elif FORMAT_IMAGE == 'webp':
             encoded_image = encode_frame_to_webp(frame_proc, quality=30)
             full_bytes = encoded_image
-        print(f"Encoding took" + str(time.time() - start_time))
+        # print(f"Encoding took" + str(time.time() - start_time))
         try:
             frame_bin = encode_udp_to_frame(full_bytes)
             cv2.imwrite(f"encoded_{frame_count}.png", frame_bin)
@@ -162,7 +168,7 @@ if __name__ == "__main__":
             elif FORMAT_IMAGE == 'webp':
                 decoded_frame = decode_webp_to_frame(decoded_data)
                 cv2.imwrite(f"recovered_{frame_count}.png", decoded_frame)
-            print("the decode took: " + str(time.time() - start_decode_time))
+            # print("the decode took: " + str(time.time() - start_decode_time))
             print("-------------------------------")
             print(f"Decoded matches: {decoded_data == full_bytes}")
             print("-------------------------------")
