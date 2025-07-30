@@ -44,3 +44,4 @@ def decode_webp_to_frame(webp_bytes: bytes) -> np.ndarray:
     except Exception as e:  # Handle corrupted WebP (e.g., bit errors from VTX noise)
         print(f"WebP decode error: {e}. Returning fallback frame.")
         return np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)  # Black frame
+
