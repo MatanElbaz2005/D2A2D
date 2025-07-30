@@ -4,6 +4,7 @@ from scipy import signal
 import cv2
 from webp_encdec import encode_frame_to_webp, decode_webp_to_frame
 import time
+from helpers import conv_encode_bits, viterbi_decode_bits
 
 # Config
 FRAME_WIDTH = 720
@@ -14,6 +15,11 @@ SYNC_PRBS_POLY = [6, 5]
 CHIP_LENGTH = 3
 DATA_PRBS_POLY = [2, 1]
 FORMAT_IMAGE = 'jpg'  # can be WEBP or JPG
+MEMORY = [6]
+G_MATRIX = [[0o133, 0o171]]
+TB_DEPTH = 15
+INTERLEAVER_ROWS = 8
+
 
 def generate_prbs(length: int, poly: list[int]) -> np.ndarray:
     degree = poly[0]
@@ -31,14 +37,30 @@ def generate_prbs(length: int, poly: list[int]) -> np.ndarray:
 SYNC_PRBS = generate_prbs(SYNC_PRBS_LENGTH, SYNC_PRBS_POLY)
 DATA_PRBS = generate_prbs(CHIP_LENGTH, DATA_PRBS_POLY)
 
+def block_interleave(data: bytes, rows: int = INTERLEAVER_ROWS) -> bytes:
+    cols = int(np.ceil(len(data) / rows))
+    padded = data + bytes(cols * rows - len(data))
+    matrix = np.frombuffer(padded, dtype=np.uint8).reshape(rows, cols)
+    return bytes(matrix.T.flatten()[:len(data)])
+
+def block_deinterleave(data: bytes, rows: int = INTERLEAVER_ROWS) -> bytes:
+    cols = int(np.ceil(len(data) / rows))
+    padded = data + bytes(cols * rows - len(data))
+    matrix = np.frombuffer(padded, dtype=np.uint8).reshape(cols, rows).T
+    return bytes(matrix.flatten()[:len(data)])
+
 def encode_udp_to_frame(udp_data: bytes) -> np.ndarray:
     """
     Encode UDP packet into a black/white frame with vectorized spread-spectrum.
     """
     udp_data = len(udp_data).to_bytes(4, "big") + udp_data
     rsc = RSCodec(ECC_SYMBOLS)
-    coded_data = rsc.encode(udp_data)
-    bit_stream = np.unpackbits(np.frombuffer(coded_data, dtype=np.uint8))
+    coded_rs = rsc.encode(udp_data)
+    interleaved = block_interleave(coded_rs)
+    codelen = len(interleaved).to_bytes(2, "big")
+    meta_and_data = codelen + interleaved
+    uncoded_bits = np.unpackbits(np.frombuffer(meta_and_data, dtype=np.uint8))
+    bit_stream = uncoded_bits
     bits_pm = 2.0 * bit_stream - 1  # ±1
     # Vectorized spreading: repeat bits and multiply by tiled PRBS
     repeated_bits = np.repeat(bits_pm, CHIP_LENGTH)
@@ -76,10 +98,14 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     rx_bits_pm = np.dot(chips, DATA_PRBS) / CHIP_LENGTH
     rx_bits = ((np.sign(rx_bits_pm) + 1) / 2).astype(np.uint8)
     # Pack bits to bytes (vectorized)
-    coded_data = np.packbits(rx_bits)
+    rx_bytes = np.packbits(rx_bits).tobytes()
+    codelen = int.from_bytes(rx_bytes[:2], "big")
+    rs_input = rx_bytes[2 : 2 + codelen]
+    deinterleaved_bytes = block_deinterleave(rs_input)
+
     rsc = RSCodec(ECC_SYMBOLS)
     try:
-        decoded_data_with_length = bytes(rsc.decode(coded_data)[0])
+        decoded_data_with_length = bytes(rsc.decode(deinterleaved_bytes)[0])
         msg_len = int.from_bytes(decoded_data_with_length[:4], "big")
         return decoded_data_with_length[4:4 + msg_len]
     except ReedSolomonError as e:
@@ -118,7 +144,7 @@ if __name__ == "__main__":
             print(f"Encoded frame {frame_count} saved.")
             noisy = frame_bin.copy()
             noise_mask = np.random.choice([0, 255], size=noisy.shape,
-                                            p=[0.97, 0.03]).astype(np.uint8) # 3% bit flips
+                                            p=[0.96, 0.04]).astype(np.uint8) # 3% bit flips
             noisy ^= noise_mask
             decoded_data = decode_frame_to_udp(noisy)
             start_decode_time = time.time()
