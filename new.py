@@ -4,7 +4,6 @@ from scipy import signal
 import cv2
 from webp_encdec import encode_frame_to_webp, decode_webp_to_frame
 import time
-from helpers import conv_encode_bits, viterbi_decode_bits
 
 # Config
 FRAME_WIDTH = 720
@@ -20,6 +19,7 @@ G_MATRIX = [[0o133, 0o171]]
 TB_DEPTH = 15
 INTERLEAVER_ROWS = 8
 PATH_TO_VIDEO = r"C:\Users\matan\OneDrive\מסמכים\Matan\D2A2D\1572378-sd_960_540_24fps.mp4"
+USE_INTERLEAVER = False
 
 
 def generate_prbs(length: int, poly: list[int]) -> np.ndarray:
@@ -57,10 +57,13 @@ def encode_udp_to_frame(udp_data: bytes) -> np.ndarray:
     udp_data = len(udp_data).to_bytes(4, "big") + udp_data
     rsc = RSCodec(ECC_SYMBOLS)
     coded_rs = rsc.encode(udp_data)
-    interleaved = block_interleave(coded_rs)
-    codelen = len(interleaved).to_bytes(2, "big")
-    meta_and_data = codelen + interleaved
-    uncoded_bits = np.unpackbits(np.frombuffer(meta_and_data, dtype=np.uint8))
+    if USE_INTERLEAVER:
+        interleaved = block_interleave(coded_rs)
+        codelen = len(interleaved).to_bytes(2, "big")
+        meta_and_data = codelen + interleaved
+        uncoded_bits = np.unpackbits(np.frombuffer(meta_and_data, dtype=np.uint8))
+    else:
+        uncoded_bits = np.unpackbits(np.frombuffer(coded_rs, dtype=np.uint8))
     bit_stream = uncoded_bits
     bits_pm = 2.0 * bit_stream - 1  # ±1
     # Vectorized spreading: repeat bits and multiply by tiled PRBS
@@ -100,13 +103,17 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     rx_bits = ((np.sign(rx_bits_pm) + 1) / 2).astype(np.uint8)
     # Pack bits to bytes (vectorized)
     rx_bytes = np.packbits(rx_bits).tobytes()
-    codelen = int.from_bytes(rx_bytes[:2], "big")
-    rs_input = rx_bytes[2 : 2 + codelen]
-    deinterleaved_bytes = block_deinterleave(rs_input)
+    if USE_INTERLEAVER:
+        codelen = int.from_bytes(rx_bytes[:2], "big")
+        rs_input = rx_bytes[2 : 2 + codelen]
+        deinterleaved_bytes = block_deinterleave(rs_input)
 
     rsc = RSCodec(ECC_SYMBOLS)
     try:
-        decoded_data_with_length = bytes(rsc.decode(deinterleaved_bytes)[0])
+        if USE_INTERLEAVER:
+            decoded_data_with_length = bytes(rsc.decode(deinterleaved_bytes)[0])
+        else:
+            decoded_data_with_length = bytes(rsc.decode(rx_bytes)[0])
         msg_len = int.from_bytes(decoded_data_with_length[:4], "big")
         return decoded_data_with_length[4:4 + msg_len]
     except ReedSolomonError as e:
