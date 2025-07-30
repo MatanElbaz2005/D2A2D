@@ -88,11 +88,15 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     """
     Decode a noisy frame with vectorized despreading.
     """
-    start_decode_time = time.time()
+    t0 = time.time()
     if frame.shape != (FRAME_HEIGHT, FRAME_WIDTH):
         raise ValueError(f"Frame size mismatch: expected {FRAME_HEIGHT}x{FRAME_WIDTH}")
     received_pm = 2 * (frame.ravel() > 127).astype(np.int32) - 1  # ±1, int32 for dot
+    t1 = time.time()
+    print(f"[perf] threshold → ±1: {t1 - t0} sec")
     corr = signal.correlate(received_pm, SYNC_PRBS, mode='valid') / SYNC_PRBS_LENGTH
+    t2 = time.time()
+    print(f"[perf] correlation: {t2 - t1} sec")
     max_corr = np.max(corr)
     if max_corr < corr_threshold:
         raise ValueError(f"Sync not detected (max corr {max_corr})")
@@ -104,13 +108,19 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     # Vectorized despreading: reshape and matrix multiply
     chips = spread_bits.reshape(-1, CHIP_LENGTH)
     rx_bits_pm = np.dot(chips, DATA_PRBS) / CHIP_LENGTH
+    t3 = time.time()
+    print(f"[perf] despreading: {t3 - t2} sec")
     rx_bits = ((np.sign(rx_bits_pm) + 1) / 2).astype(np.uint8)
     # Pack bits to bytes (vectorized)
     rx_bytes = np.packbits(rx_bits).tobytes()
+    t4 = time.time()
+    print(f"[perf] packbits: {t4 - t3} sec")
     if USE_INTERLEAVER:
         codelen = int.from_bytes(rx_bytes[:2], "big")
         rs_input = rx_bytes[2 : 2 + codelen]
         deinterleaved_bytes = block_deinterleave(rs_input)
+        t5 = time.time()
+        print(f"[perf] de‑interleave: {t5 - t4} sec")
 
     rsc = RSCodec(ECC_SYMBOLS)
     try:
@@ -118,8 +128,10 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
             decoded_data_with_length = bytes(rsc.decode(deinterleaved_bytes)[0])
         else:
             decoded_data_with_length = bytes(rsc.decode(rx_bytes)[0])
+        t6 = time.time()
+        print(f"[perf] RS decode: {t6 - (t5 if USE_INTERLEAVER else t4)} sec")
         msg_len = int.from_bytes(decoded_data_with_length[:4], "big")
-        print("the decode took: " + str(time.time() - start_decode_time) + "when USE_INTERLEAVER is " + str(USE_INTERLEAVER))
+        print("total decode time: " + str(time.time() - t0) + " (USE_INTERLEAVER=" + str(USE_INTERLEAVER) + ")")
         print("--------------------------------")
         return decoded_data_with_length[4:4 + msg_len]
     except ReedSolomonError as e:
