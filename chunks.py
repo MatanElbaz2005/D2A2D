@@ -75,15 +75,23 @@ def generate_prbs(length: int, poly: list[int], seed: int | None = None) -> np.n
 if USE_PRBS:
     DATA_PRBS = generate_prbs(CHIP_LENGTH, DATA_PRBS_POLY)
 
-def tile_to_jpeg(tile: np.ndarray, q: int = 30) -> bytes:
-    ok, buf = cv2.imencode(".jpg", tile, [cv2.IMWRITE_JPEG_QUALITY, q])
-    if not ok:
-        raise ValueError("cv2.imencode failed")
-    return buf.tobytes()
+def tile_encode(tile: np.ndarray, quality: int = 30) -> bytes:
+    """encode one 144 × 96 tile to JPEG / WebP according to FORMAT_IMAGE"""
+    if FORMAT_IMAGE.lower() == "webp":
+        return encode_frame_to_webp(tile, quality=quality)
+    else:
+        ok, buf = cv2.imencode(".jpg", tile,
+                               [cv2.IMWRITE_JPEG_QUALITY, quality])
+        if not ok:
+            raise ValueError("cv2.imencode failed")
+        return buf.tobytes()
 
-def jpeg_to_bgr(data: bytes) -> np.ndarray | None:
-    img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-    return img
+def tile_decode(data: bytes) -> np.ndarray | None:
+    if FORMAT_IMAGE.lower() == "webp":
+        return decode_webp_to_frame(data)
+    else:
+        return cv2.imdecode(np.frombuffer(data, np.uint8),
+                            cv2.IMREAD_COLOR)
 
 
 
@@ -203,7 +211,7 @@ if __name__ == "__main__":
                     y0, y1 = tr*TILE_H, (tr+1)*TILE_H
                     x0, x1 = tc*TILE_W, (tc+1)*TILE_W
                     tile   = frame_proc[y0:y1, x0:x1]
-                    tiles_bytes.append(tile_to_jpeg(tile, q=30))
+                    tiles_bytes.append(tile_encode(tile, quality=30))
 
             frame_bin = encode_tiles_stream(tiles_bytes)
             cv2.imwrite(f"encoded_{frame_count}.png", frame_bin)
@@ -220,7 +228,7 @@ if __name__ == "__main__":
             for tid, data in enumerate(tiles_dec):
                 if data is None:
                     continue
-                img = jpeg_to_bgr(data)
+                img = tile_decode(data)
                 if img is None:
                     continue
                 r, c = divmod(tid, TILE_COLS)
