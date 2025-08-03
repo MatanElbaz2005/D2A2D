@@ -12,6 +12,7 @@ ECC_SYMBOLS = 32
 SYNC_PRBS_LENGTH = 63
 SYNC_PRBS_POLY = [6, 5]
 CHIP_LENGTH = 3
+USE_PRBS = False
 DATA_PRBS_POLY = [2, 1]
 FORMAT_IMAGE = 'jpg'  # can be WEBP or JPG
 MEMORY = [6]
@@ -28,6 +29,51 @@ TILE_COLS = 5
 TILE_COUNT = TILE_ROWS * TILE_COLS
 TILE_W    = FRAME_W  // TILE_COLS   # 720 // 5 = 144
 TILE_H    = FRAME_H // TILE_ROWS   # 480 // 5 =  96
+
+
+def generate_prbs(length: int, poly: list[int], seed: int | None = None) -> np.ndarray:
+    """
+    Generate a ±1 pseudo-random binary sequence (PRBS) with a linear-feedback shift register.
+
+    Parameters
+    ----------
+    length : int
+        Number of output chips to produce.
+    poly   : list[int]
+        Tap polynomial for the LFSR.  
+        `poly[0]` is the register size N; the remaining values are the tap
+        positions (counted from MSB, 1-based).  
+        Example ``[6, 5]`` → 6-bit LFSR with feedback taps at bits 6 and 5.
+    seed   : int, optional
+        Initial register state.  If *None*, the register is initialised to
+        all ones.  A zero state is never allowed because it would lock the LFSR.
+
+    Returns
+    -------
+    numpy.ndarray of shape ``(length,)`` and dtype ``int8``
+        The PRBS expressed as +1 / −1 chips.
+    """
+    degree = poly[0]                                 # register size (bits)
+    if seed is None:
+        state = (1 << degree) - 1                    # default seed: 0b111…1
+    else:
+        state = seed & ((1 << degree) - 1)           # mask to degree bits
+
+    out  = np.empty(length, dtype=np.int8)
+    taps = [degree - t for t in poly[1:]]            # shifts for XOR taps
+
+    for i in range(length):
+        lsb        = state & 1                       # output bit (LSB)
+        out[i]     = 1 if lsb else -1                # map {0,1} → {-1,+1}
+        feedback   = 0
+        for sh in taps:                              # XOR of tap bits
+            feedback ^= (state >> sh) & 1
+        state = (state >> 1) | (feedback << (degree - 1))
+
+    return out
+
+if USE_PRBS:
+    DATA_PRBS = generate_prbs(CHIP_LENGTH, DATA_PRBS_POLY)
 
 def tile_to_jpeg(tile: np.ndarray, q: int = 30) -> bytes:
     ok, buf = cv2.imencode(".jpg", tile, [cv2.IMWRITE_JPEG_QUALITY, q])
@@ -55,8 +101,11 @@ def encode_tiles_stream(tiles: list[bytes]) -> np.ndarray:
         size   = len(raw)
         header = bytes([tid]) + size.to_bytes(2, 'big')
         payload_bits = np.unpackbits(np.frombuffer(header + raw, np.uint8))
-        print(f"[ENC] tile {tid:02d}: {size} B  ->  {payload_bits.size} bits")
-        bitstream.extend(payload_bits.tolist())
+        if USE_PRBS:
+            spread = np.repeat(payload_bits*2-1, CHIP_LENGTH) * np.tile(DATA_PRBS, payload_bits.size)
+            bitstream.extend(((spread+1)//2).astype(np.uint8).tolist())
+        else:
+            bitstream.extend(payload_bits.tolist())
 
     payload_len = len(bitstream) - payload_start      # number of bits of real payload
     len_bytes = payload_len.to_bytes(4, 'big')        # 32-bit big-endian length
@@ -110,8 +159,15 @@ def decode_stream_to_tiles(frame: np.ndarray) -> list[bytes | None]:
             print("[DEC] truncated payload – expected", nbits, "bits but only", end_idx-idx, "left")
             break                          
 
-        byte_arr = np.packbits(bits[idx:idx+nbits])[:size]
-        idx += nbits
+        if USE_PRBS:
+            spread_bits = bits[idx:idx+nbits*CHIP_LENGTH]*2 - 1
+            despread   = spread_bits.reshape(-1, CHIP_LENGTH) @ DATA_PRBS
+            despread   = ((np.sign(despread) + 1) // 2).astype(np.uint8)
+            byte_arr   = np.packbits(despread)[:size]
+            idx       += nbits*CHIP_LENGTH
+        else:
+            byte_arr = np.packbits(bits[idx:idx+nbits])[:size]
+            idx     += nbits
 
         if 0 <= tid < TILE_COUNT:
             tiles[tid] = byte_arr       
