@@ -78,12 +78,21 @@ def decode_stream_to_tiles(frame: np.ndarray) -> list[bytes | None]:
     """Extract list[25] (bytes or None) from a received mono frame."""
     bits = (frame.ravel() > 127).astype(np.uint8)
 
-    for pos in range(0, bits.size - SYNC_BITS.size + 1, 8):
-        if np.array_equal(bits[pos:pos+SYNC_BITS.size], SYNC_BITS):
-            break
-    else:
-        raise ValueError("Sync not found")
-    idx  = pos + SYNC_BITS.size
+    # Signed ±1 vectors
+    rx_pm   = 2*bits.astype(np.int16) - 1 # {0,1}→{-1,+1}
+    sync_pm = 2*SYNC_BITS.astype(np.int16) - 1
+
+    # correlation
+    corr = np.correlate(rx_pm, sync_pm, mode='valid').astype(np.int32)
+
+    pos  = int(corr.argmax())
+    score = corr[pos] / SYNC_BITS.size
+    print(f"[DEC] best-corr pos={pos}  score={score:.3f}")
+
+    if score < 0.7:
+        raise ValueError("Sync not found – correlation too low")
+
+    idx = pos + SYNC_BITS.size
     total_len_bits = bits[idx : idx+32]  # read the 32-bit length
     payload_len    = int.from_bytes(np.packbits(total_len_bits), 'big')
     idx += 32
@@ -98,6 +107,7 @@ def decode_stream_to_tiles(frame: np.ndarray) -> list[bytes | None]:
         size = int.from_bytes(hdr_bytes[1:3], 'big')
         nbits = size * 8
         if idx + nbits > end_idx:
+            print("[DEC] truncated payload – expected", nbits, "bits but only", end_idx-idx, "left")
             break                          
 
         byte_arr = np.packbits(bits[idx:idx+nbits])[:size]
