@@ -18,13 +18,13 @@ MEMORY = [6]
 G_MATRIX = [[0o133, 0o171]]
 TB_DEPTH = 15
 INTERLEAVER_ROWS = 8
-PATH_TO_VIDEO = r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
+PATH_TO_VIDEO = r"C:\Users\matan\OneDrive\מסמכים\Matan\D2A2D\1572378-sd_960_540_24fps.mp4"
 USE_INTERLEAVER = False
 SYNC_BYTES = b'\xD3\xA1\xCF\x55'
 SYNC_BITS  = np.unpackbits(np.frombuffer(SYNC_BYTES, np.uint8))
 
-TILE_ROWS = 1
-TILE_COLS = 1
+TILE_ROWS = 5
+TILE_COLS = 5
 TILE_COUNT = TILE_ROWS * TILE_COLS
 TILE_W    = FRAME_W  // TILE_COLS   # 720 // 5 = 144
 TILE_H    = FRAME_H // TILE_ROWS   # 480 // 5 =  96
@@ -47,6 +47,9 @@ def encode_tiles_stream(tiles: list[bytes]) -> np.ndarray:
     returns: 720×480 mono image – 0 = black, 255 = white.
     """
     bitstream = SYNC_BITS.tolist()
+    length_placeholder = [0]*32 # BEFORE we know the size
+    bitstream.extend(length_placeholder)
+    payload_start = len(bitstream) # remember where payload really starts
 
     for tid, raw in enumerate(tiles):
         size   = len(raw)
@@ -55,6 +58,11 @@ def encode_tiles_stream(tiles: list[bytes]) -> np.ndarray:
         print(f"[ENC] tile {tid:02d}: {size} B  ->  {payload_bits.size} bits")
         bitstream.extend(payload_bits.tolist())
 
+    payload_len = len(bitstream) - payload_start      # number of bits of real payload
+    len_bytes = payload_len.to_bytes(4, 'big')        # 32-bit big-endian length
+    len_bits  = np.unpackbits(np.frombuffer(len_bytes, np.uint8))
+    bitstream[payload_start-32 : payload_start] = len_bits   # overwrite placeholder
+    
     total_bits = FRAME_W * FRAME_H
     print(f"[ENC] stream bits: {len(bitstream)} / canvas: {total_bits}") 
     if len(bitstream) > total_bits:
@@ -76,16 +84,20 @@ def decode_stream_to_tiles(frame: np.ndarray) -> list[bytes | None]:
     else:
         raise ValueError("Sync not found")
     idx  = pos + SYNC_BITS.size
+    total_len_bits = bits[idx : idx+32]  # read the 32-bit length
+    payload_len    = int.from_bytes(np.packbits(total_len_bits), 'big')
+    idx += 32
+    end_idx = idx + payload_len  # last bit that is still payload
 
     tiles = [None]*TILE_COUNT
-    while idx + 24 < bits.size: 
+    while idx + 24 <= end_idx: 
         header_bits  = bits[idx : idx+24]               
         idx += 24   
         hdr_bytes = np.packbits(header_bits)                    
         tid = hdr_bytes[0]                       
         size = int.from_bytes(hdr_bytes[1:3], 'big')
         nbits = size * 8
-        if idx + nbits > bits.size:
+        if idx + nbits > end_idx:
             break                          
 
         byte_arr = np.packbits(bits[idx:idx+nbits])[:size]
