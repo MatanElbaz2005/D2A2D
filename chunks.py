@@ -12,7 +12,6 @@ ECC_SYMBOLS = 32
 SYNC_PRBS_LENGTH = 63
 SYNC_PRBS_POLY = [6, 5]
 CHIP_LENGTH = 3
-USE_PRBS = False
 DATA_PRBS_POLY = [2, 1]
 FORMAT_IMAGE = 'jpg'  # can be WEBP or JPG
 MEMORY = [6]
@@ -20,9 +19,13 @@ G_MATRIX = [[0o133, 0o171]]
 TB_DEPTH = 15
 INTERLEAVER_ROWS = 8
 PATH_TO_VIDEO = r"C:\Users\matan\OneDrive\מסמכים\Matan\D2A2D\1572378-sd_960_540_24fps.mp4"
-USE_INTERLEAVER = False
 SYNC_BYTES = b'\xD3\xA1\xCF\x55'
 SYNC_BITS  = np.unpackbits(np.frombuffer(SYNC_BYTES, np.uint8))
+
+#flags
+USE_RS = True
+USE_PRBS = False
+USE_INTERLEAVER = False
 
 TILE_ROWS = 5
 TILE_COLS = 5
@@ -106,9 +109,15 @@ def encode_tiles_stream(tiles: list[bytes]) -> np.ndarray:
     payload_start = len(bitstream) # remember where payload really starts
 
     for tid, raw in enumerate(tiles):
-        size   = len(raw)
+        if USE_RS:
+            raw_coded = RSCodec(ECC_SYMBOLS).encode(raw)
+        else:
+            raw_coded = raw
+
+        size   = len(raw_coded)
         header = bytes([tid]) + size.to_bytes(2, 'big')
-        payload_bits = np.unpackbits(np.frombuffer(header + raw, np.uint8))
+        payload_bits = np.unpackbits(np.frombuffer(header + raw_coded, np.uint8))
+
         if USE_PRBS:
             spread = np.repeat(payload_bits*2-1, CHIP_LENGTH) * np.tile(DATA_PRBS, payload_bits.size)
             bitstream.extend(((spread+1)//2).astype(np.uint8).tolist())
@@ -177,6 +186,13 @@ def decode_stream_to_tiles(frame: np.ndarray) -> list[bytes | None]:
             byte_arr = np.packbits(bits[idx:idx+nbits])[:size]
             idx     += nbits
 
+        if USE_RS:
+            try:
+                byte_arr = RSCodec(ECC_SYMBOLS).decode(byte_arr)[0]
+            except ReedSolomonError as e:
+                print("[DEC] RS decode failed:", e)
+                byte_arr = None
+                
         if 0 <= tid < TILE_COUNT:
             tiles[tid] = byte_arr       
         
@@ -220,7 +236,7 @@ if __name__ == "__main__":
             noise_mask = np.random.choice([0, 255], size=noisy.shape,
                                             p=[0.97, 0.03]).astype(np.uint8) # 3% bit flips
             noisy ^= noise_mask
-            tiles_dec = decode_stream_to_tiles(frame_bin)
+            tiles_dec = decode_stream_to_tiles(noisy)
             print("[MAIN] decoded lengths:",
                 [len(b) if b is not None else 0 for b in tiles_dec])
             restored  = np.zeros_like(frame_proc)
