@@ -18,17 +18,17 @@ MEMORY = [6]
 G_MATRIX = [[0o133, 0o171]]
 TB_DEPTH = 15
 INTERLEAVER_ROWS = 8
-PATH_TO_VIDEO = r"C:\Users\matan\OneDrive\מסמכים\Matan\D2A2D\1572378-sd_960_540_24fps.mp4"
+PATH_TO_VIDEO = r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
 SYNC_BYTES = b'\xD3\xA1\xCF\x55'
 SYNC_BITS  = np.unpackbits(np.frombuffer(SYNC_BYTES, np.uint8))
 
 #flags
-USE_RS = True
+USE_RS = False
 USE_PRBS = False
 USE_INTERLEAVER = False
 
-TILE_ROWS = 5
-TILE_COLS = 5
+TILE_ROWS = 2
+TILE_COLS = 2
 TILE_COUNT = TILE_ROWS * TILE_COLS
 TILE_W    = FRAME_W  // TILE_COLS   # 720 // 5 = 144
 TILE_H    = FRAME_H // TILE_ROWS   # 480 // 5 =  96
@@ -221,14 +221,19 @@ if __name__ == "__main__":
         TARGET_W, TARGET_H = 720, 480
         frame_proc = cv2.resize(frame, (TARGET_W, TARGET_H))
         try:
+            total_encode_time = 0
             tiles_bytes = []
             for tr in range(TILE_ROWS):
                 for tc in range(TILE_COLS):
                     y0, y1 = tr*TILE_H, (tr+1)*TILE_H
                     x0, x1 = tc*TILE_W, (tc+1)*TILE_W
                     tile   = frame_proc[y0:y1, x0:x1]
+                    start_encode = time.time()
                     tiles_bytes.append(tile_encode(tile, quality=30))
+                    end_encode = time.time()
+                    total_encode_time += end_encode - start_encode
 
+            print(f"[MAIN] encoded {len(tiles_bytes)} tiles in {total_encode_time} sec for {FORMAT_IMAGE} format")
             frame_bin = encode_tiles_stream(tiles_bytes)
             cv2.imwrite(f"encoded_{frame_count}.png", frame_bin)
             print(f"Encoded frame {frame_count} saved.")
@@ -236,21 +241,26 @@ if __name__ == "__main__":
             noise_mask = np.random.choice([0, 255], size=noisy.shape,
                                             p=[0.97, 0.03]).astype(np.uint8) # 3% bit flips
             noisy ^= noise_mask
-            tiles_dec = decode_stream_to_tiles(noisy)
+            tiles_dec = decode_stream_to_tiles(frame_bin)
             print("[MAIN] decoded lengths:",
                 [len(b) if b is not None else 0 for b in tiles_dec])
             restored  = np.zeros_like(frame_proc)
-
+            
+            total_decode_time = 0
             for tid, data in enumerate(tiles_dec):
                 if data is None:
                     continue
+                start_decode = time.time()
                 img = tile_decode(data)
+                end_decode = time.time()
+                total_decode_time += end_decode - start_decode
                 if img is None:
                     continue
                 r, c = divmod(tid, TILE_COLS)
                 y0, y1 = r*TILE_H, (r+1)*TILE_H
                 x0, x1 = c*TILE_W, (c+1)*TILE_W
                 restored[y0:y1, x0:x1] = cv2.resize(img, (TILE_W, TILE_H))
+            print(f"[MAIN] decoded {len(tiles_dec)} tiles in {total_decode_time} sec for {FORMAT_IMAGE} format")
             cv2.imwrite(f"restored_{frame_count}.jpg", restored)
 
 
