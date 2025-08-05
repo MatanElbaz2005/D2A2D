@@ -51,3 +51,44 @@ def viterbi_decode_bits(
         if len(decoded) >= tb_depth:
             pass  # keep tracing
     return np.array(decoded[::-1], dtype=np.uint8)
+
+def generate_prbs(length: int, poly: list[int], seed: int | None = None) -> np.ndarray:
+    """
+    Generate a ±1 pseudo-random binary sequence (PRBS) with a linear-feedback shift register.
+
+    Parameters
+    ----------
+    length : int
+        Number of output chips to produce.
+    poly   : list[int]
+        Tap polynomial for the LFSR.  
+        `poly[0]` is the register size N; the remaining values are the tap
+        positions (counted from MSB, 1-based).  
+        Example ``[6, 5]`` → 6-bit LFSR with feedback taps at bits 6 and 5.
+    seed   : int, optional
+        Initial register state.  If *None*, the register is initialised to
+        all ones.  A zero state is never allowed because it would lock the LFSR.
+
+    Returns
+    -------
+    numpy.ndarray of shape ``(length,)`` and dtype ``int8``
+        The PRBS expressed as +1 / −1 chips.
+    """
+    degree = poly[0]                                 # register size (bits)
+    if seed is None:
+        state = (1 << degree) - 1                    # default seed: 0b111…1
+    else:
+        state = seed & ((1 << degree) - 1)           # mask to degree bits
+
+    out  = np.empty(length, dtype=np.int8)
+    taps = [degree - t for t in poly[1:]]            # shifts for XOR taps
+
+    for i in range(length):
+        lsb        = state & 1                       # output bit (LSB)
+        out[i]     = 1 if lsb else -1                # map {0,1} → {-1,+1}
+        feedback   = 0
+        for sh in taps:                              # XOR of tap bits
+            feedback ^= (state >> sh) & 1
+        state = (state >> 1) | (feedback << (degree - 1))
+
+    return out
