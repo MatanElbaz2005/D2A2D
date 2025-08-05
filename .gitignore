@@ -2,3 +2,4 @@ matanVenv/
 *.jpg
 *.png
 __pycache__/
+*.bin
