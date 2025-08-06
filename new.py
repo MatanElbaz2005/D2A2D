@@ -2,142 +2,182 @@ import numpy as np
 from reedsolo import RSCodec, ReedSolomonError
 from scipy import signal
 import cv2
-from webp_encdec import encode_frame_to_webp, decode_webp_to_frame
 import time
+from protected_jpeg import jpg_parse, jpg_build, fix_false_markers
+from helpers import generate_prbs
 
 # Config
 FRAME_WIDTH = 720
-FRAME_HEIGHT = 480  # NTSC; use 576 for PAL
+FRAME_HEIGHT = 480  # NTSC
 ECC_SYMBOLS = 32
-SYNC_PRBS_LENGTH = 63
-SYNC_PRBS_POLY = [6, 5]
-CHIP_LENGTH = 3
-DATA_PRBS_POLY = [2, 1]
-FORMAT_IMAGE = 'jpg'  # can be WEBP or JPG
+CHIP_LENGTH_FOR_HEADERS = 3
+DATA_PRBS_POLY = [8, 2]
+FORMAT_IMAGE = 'jpg'
 MEMORY = [6]
 G_MATRIX = [[0o133, 0o171]]
-TB_DEPTH = 15
-INTERLEAVER_ROWS = 8
-PATH_TO_VIDEO = r"C:\Users\matan\OneDrive\מסמכים\Matan\D2A2D\1572378-sd_960_540_24fps.mp4"
-USE_INTERLEAVER = False
+TB_LENGTH = 15
+PATH_TO_VIDEO = r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
+USE_PRBS = True
+USE_RS = False
+rsc = RSCodec(ECC_SYMBOLS)
 
+# Sync patterns (Barker codes, ±1)
+HEADERS_SYNC_PATTERN = np.array([1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, -1, 1], dtype=np.int32)
+DATA_SYNC_PATTERN = np.array([1, -1, 1, -1, 1, 1, -1, -1, 1, 1, 1, 1, 1], dtype=np.int32)
+END_SYNC_PATTERN = np.array([-1, -1, -1, -1, -1, 1, 1, -1, -1, 1, -1, 1, -1, 1, 1, -1, 1, -1, -1, 1], dtype=np.int32)  # Extended pattern
 
-def generate_prbs(length: int, poly: list[int]) -> np.ndarray:
-    degree = poly[0]
-    state = (1 << degree) - 1
-    prbs = np.zeros(length, dtype=int)
-    for i in range(length):
-        bit = state & 1
-        prbs[i] = bit
-        feedback = 0
-        for tap in poly[1:]:
-            feedback ^= (state >> (degree - tap)) & 1
-        state = (state >> 1) | (feedback << (degree - 1))
-    return 2 * prbs[:length] - 1  # ±1
+# PRBS for spreading (if enabled)
+DATA_PRBS = generate_prbs(CHIP_LENGTH_FOR_HEADERS, DATA_PRBS_POLY, 3) if USE_PRBS else None
 
-SYNC_PRBS = generate_prbs(SYNC_PRBS_LENGTH, SYNC_PRBS_POLY)
-DATA_PRBS = generate_prbs(CHIP_LENGTH, DATA_PRBS_POLY)
-
-def block_interleave(data: bytes, rows: int = INTERLEAVER_ROWS) -> bytes:
-    cols = int(np.ceil(len(data) / rows))
-    padded = data + bytes(cols * rows - len(data))
-    matrix = np.frombuffer(padded, dtype=np.uint8).reshape(rows, cols)
-    return bytes(matrix.T.flatten()[:len(data)])
-
-def block_deinterleave(data: bytes, rows: int = INTERLEAVER_ROWS) -> bytes:
-    cols = int(np.ceil(len(data) / rows))
-    padded = data + bytes(cols * rows - len(data))
-    matrix = np.frombuffer(padded, dtype=np.uint8).reshape(cols, rows).T
-    return bytes(matrix.flatten()[:len(data)])
-
-def encode_udp_to_frame(udp_data: bytes) -> np.ndarray:
-    """
-    Encode UDP packet into a black/white frame with vectorized spread-spectrum.
-    """
-    start_encoding_time = time.time()
-    udp_data = len(udp_data).to_bytes(4, "big") + udp_data
-    rsc = RSCodec(ECC_SYMBOLS)
-    coded_rs = rsc.encode(udp_data)
-    if USE_INTERLEAVER:
-        interleaved = block_interleave(coded_rs)
-        codelen = len(interleaved).to_bytes(2, "big")
-        meta_and_data = codelen + interleaved
-        uncoded_bits = np.unpackbits(np.frombuffer(meta_and_data, dtype=np.uint8))
+def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
+    start_time = time.time()
+    
+    print(f"[encode] Header size: {len(headers)} bytes")
+    print(f"[encode] First 10 header bytes: {headers[:10].hex()}")
+    print(f"[encode] Last 10 header bytes: {headers[-10:].hex()}")
+    
+    if USE_RS:
+        coded_headers = rsc.encode(headers)
+        print(f"[encode] RS-coded header size: {len(coded_headers)} bytes")
     else:
-        uncoded_bits = np.unpackbits(np.frombuffer(coded_rs, dtype=np.uint8))
-    bit_stream = uncoded_bits
-    bits_pm = 2.0 * bit_stream - 1  # ±1
-    # Vectorized spreading: repeat bits and multiply by tiled PRBS
-    repeated_bits = np.repeat(bits_pm, CHIP_LENGTH)
-    tiled_prbs = np.tile(DATA_PRBS, len(bits_pm))
-    spread_stream = repeated_bits * tiled_prbs
-    full_stream = np.concatenate((SYNC_PRBS, spread_stream))
+        coded_headers = headers
+        print(f"[encode] No RS, header size: {len(coded_headers)} bytes")
+    
+    header_bits = np.unpackbits(np.frombuffer(coded_headers, dtype=np.uint8))
+    print(f"[encode] Header bits length: {len(header_bits)}")
+    header_bits_pm = 2.0 * header_bits - 1
+    
+    if USE_PRBS:
+        repeated_bits = np.repeat(header_bits_pm, CHIP_LENGTH_FOR_HEADERS)
+        tiled_prbs = np.tile(DATA_PRBS, len(header_bits))
+        protected_headers = repeated_bits * tiled_prbs
+        print(f"[encode] Using PRBS, protected headers length: {len(protected_headers)} bits")
+    else:
+        mapping = {0: np.array([-1, 1, -1]), 1: np.array([1, -1, 1])}
+        protected_headers = np.concatenate([mapping[bit] for bit in header_bits])
+        print(f"[encode] Using 3-bit mapping, protected headers length: {len(protected_headers)} bits")
+    
+    data_bits = np.unpackbits(np.frombuffer(data, dtype=np.uint8))
+    print(f"[encode] Data bits length: {len(data_bits)}")
+    
+    full_stream = np.concatenate((
+        HEADERS_SYNC_PATTERN,
+        protected_headers,
+        DATA_SYNC_PATTERN,
+        2.0 * data_bits - 1,
+        END_SYNC_PATTERN
+    ))
+    print(f"[encode] Full stream length: {len(full_stream)} bits")
+    
     total_pixels = FRAME_WIDTH * FRAME_HEIGHT
     if len(full_stream) > total_pixels:
         raise ValueError(f"Data too large: {len(full_stream)} bits > {total_pixels} pixels")
-    # Map to pixels: +1→255, -1→0
+    
     full_stream = ((full_stream + 1) / 2 * 255).astype(np.uint8)
-    # Vectorized padding
     full_stream = np.pad(full_stream, (0, total_pixels - len(full_stream)), 'constant')
     frame = full_stream.reshape((FRAME_HEIGHT, FRAME_WIDTH))
-    print("--------------------------------")
-    print("the encode took: " + str(time.time() - start_encoding_time) + "when USE_INTERLEAVER is " + str(USE_INTERLEAVER))
+    
+    print(f"[encode] Frame shape: {frame.shape}")
+    print(f"Encode took: {time.time() - start_time} sec")
     return frame
 
 def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes:
-    """
-    Decode a noisy frame with vectorized despreading.
-    """
     t0 = time.time()
     if frame.shape != (FRAME_HEIGHT, FRAME_WIDTH):
         raise ValueError(f"Frame size mismatch: expected {FRAME_HEIGHT}x{FRAME_WIDTH}")
-    received_pm = 2 * (frame.ravel() > 127).astype(np.int32) - 1  # ±1, int32 for dot
+    
+    received_pm = 2 * (frame.ravel() > 127).astype(np.int32) - 1
     t1 = time.time()
-    print(f"[perf] threshold → ±1: {t1 - t0} sec")
-    corr = signal.correlate(received_pm, SYNC_PRBS, mode='valid') / SYNC_PRBS_LENGTH
+    print(f"[perf] threshold→±1: {t1 - t0} sec")
+    
+    corr_headers = signal.correlate(received_pm, HEADERS_SYNC_PATTERN, mode='valid') / len(HEADERS_SYNC_PATTERN)
+    corr_data = signal.correlate(received_pm, DATA_SYNC_PATTERN, mode='valid') / len(DATA_SYNC_PATTERN)
+    corr_end = signal.correlate(received_pm, END_SYNC_PATTERN, mode='valid') / len(END_SYNC_PATTERN)
     t2 = time.time()
-    print(f"[perf] correlation: {t2 - t1} sec")
-    max_corr = np.max(corr)
-    if max_corr < corr_threshold:
-        raise ValueError(f"Sync not detected (max corr {max_corr})")
-    sync_pos = np.argmax(corr)
-    data_start = sync_pos + SYNC_PRBS_LENGTH
-    # Truncate to multiple of CHIP_LENGTH
-    spread_len = ((len(received_pm) - data_start) // CHIP_LENGTH * CHIP_LENGTH)
-    spread_bits = received_pm[data_start:data_start + spread_len]
-    # Vectorized despreading: reshape and matrix multiply
-    chips = spread_bits.reshape(-1, CHIP_LENGTH)
-    rx_bits_pm = np.dot(chips, DATA_PRBS) / CHIP_LENGTH
+    print(f"[perf] correlations: {t2 - t1} sec")
+    print(f"[decode] Header sync max corr: {np.max(corr_headers)} at pos {np.argmax(corr_headers)}")
+    print(f"[decode] Data sync max corr: {np.max(corr_data)} at pos {np.argmax(corr_data)}")
+    print(f"[decode] End sync max corr: {np.max(corr_end)} at pos {np.argmax(corr_end)}")
+    
+    if np.max(corr_headers) < corr_threshold or np.max(corr_data) < corr_threshold or np.max(corr_end) < corr_threshold:
+        raise ValueError(f"Sync not detected: headers={np.max(corr_headers)}, data={np.max(corr_data)}, end={np.max(corr_end)}")
+    
+    headers_start = np.argmax(corr_headers) + len(HEADERS_SYNC_PATTERN)
+    data_start = np.argmax(corr_data) + len(DATA_SYNC_PATTERN)
+    data_end = np.argmax(corr_end)
+    
+    if not (headers_start < data_start < data_end):
+        raise ValueError(f"Invalid sync pattern order: headers_start={headers_start}, data_start={data_start}, data_end={data_end}")
+    print(f"[decode] Headers range: {headers_start}:{data_start - len(DATA_SYNC_PATTERN)}")
+    print(f"[decode] Data range: {data_start}:{data_end}")
+    
+    expected_data_bits = (data_end - data_start) * 8  # Approximate based on pixel range
+    print(f"[decode] Expected data bits (approx): {expected_data_bits}")
+    
+    protected_headers = received_pm[headers_start:data_start - len(DATA_SYNC_PATTERN)]
+    print(f"[decode] Protected headers length: {len(protected_headers)} bits")
     t3 = time.time()
-    print(f"[perf] despreading: {t3 - t2} sec")
-    rx_bits = ((np.sign(rx_bits_pm) + 1) / 2).astype(np.uint8)
-    # Pack bits to bytes (vectorized)
-    rx_bytes = np.packbits(rx_bits).tobytes()
+    print(f"[perf] extraction: {t3 - t2} sec")
+    
+    if USE_PRBS:
+        n_groups = len(protected_headers) // CHIP_LENGTH_FOR_HEADERS
+        chips = protected_headers[:n_groups * CHIP_LENGTH_FOR_HEADERS].reshape(-1, CHIP_LENGTH_FOR_HEADERS)
+        rx_bits_pm = np.dot(chips, DATA_PRBS) / CHIP_LENGTH_FOR_HEADERS
+        rx_bits = ((np.sign(rx_bits_pm) + 1) / 2).astype(np.uint8)
+    else:
+        n_groups = len(protected_headers) // 3
+        chips = protected_headers[:n_groups * 3].reshape(-1, 3)
+        patterns = np.array([[-1, 1, -1], [1, -1, 1]], dtype=np.int32)
+        corr = np.dot(chips, patterns.T) / 3
+        rx_bits = (np.argmax(corr, axis=1)).astype(np.uint8)
+    print(f"[decode] Despread bits length: {len(rx_bits)}")
+    print(f"[decode] First 16 despread bits: {rx_bits[:16].tolist()}")
+    print(f"[decode] Last 16 despread bits: {rx_bits[-16:].tolist()}")
+    
     t4 = time.time()
-    print(f"[perf] packbits: {t4 - t3} sec")
-    if USE_INTERLEAVER:
-        codelen = int.from_bytes(rx_bytes[:2], "big")
-        rs_input = rx_bytes[2 : 2 + codelen]
-        deinterleaved_bytes = block_deinterleave(rs_input)
-        t5 = time.time()
-        print(f"[perf] de‑interleave: {t5 - t4} sec")
+    print(f"[perf] despreading: {t4 - t3} sec")
+    
+    rx_bytes = np.packbits(rx_bits).tobytes()
+    print(f"[decode] Packed bytes length: {len(rx_bytes)}")
+    print(f"[decode] First 10 packed bytes: {rx_bytes[:10].hex()}")
+    print(f"[decode] Last 10 packed bytes: {rx_bytes[-10:].hex()}")
+    t5 = time.time()
+    print(f"[perf] packbits: {t5 - t4} sec")
+    
+    if USE_RS:
+        try:
+            t_rs = time.time()
+            decoded_headers = bytes(rsc.decode(rx_bytes)[0])
+            end_t_rs = time.time()
 
-    rsc = RSCodec(ECC_SYMBOLS)
-    try:
-        if USE_INTERLEAVER:
-            decoded_data_with_length = bytes(rsc.decode(deinterleaved_bytes)[0])
-        else:
-            decoded_data_with_length = bytes(rsc.decode(rx_bytes)[0])
-        t6 = time.time()
-        print(f"[perf] RS decode: {t6 - (t5 if USE_INTERLEAVER else t4)} sec")
-        msg_len = int.from_bytes(decoded_data_with_length[:4], "big")
-        print("total decode time: " + str(time.time() - t0) + " (USE_INTERLEAVER=" + str(USE_INTERLEAVER) + ")")
-        print("--------------------------------")
-        return decoded_data_with_length[4:4 + msg_len]
-    except ReedSolomonError as e:
-        raise ValueError(f"Decoding failed: {e}")
+        except ReedSolomonError as e:
+            raise ValueError(f"Header RS decoding failed: {e}")
+    else:
+        decoded_headers = rx_bytes
+    print(f"[decode] Decoded headers length: {len(decoded_headers)}")
+    print(f"[decode] First 10 decoded header bytes: {decoded_headers[:10].hex()}")
+    print(f"[decode] Last 10 decoded header bytes: {decoded_headers[-10:].hex()}")
+    t6 = time.time()
+    # print(f"[perf] RS decode: {end_t_rs - t_rs} sec")
+    
+    sos_index = decoded_headers.find(b'\xff\xda')
+    if not (decoded_headers.startswith(b'\xff\xd8') and sos_index != -1):
+        raise ValueError(f"Invalid JPEG headers: start={decoded_headers[:2].hex()}, sos_index={sos_index}")
+    print(f"[decode] SOS marker found at byte index: {sos_index}")
+    
+    data = received_pm[data_start:data_end]
+    data_bits = ((data + 1) / 2).astype(np.uint8)
+    print(f"[decode] Data bits length: {len(data_bits)}")
+    data_bytes = np.packbits(data_bits).tobytes()
+    fixed_data = fix_false_markers(data_bytes)
+    print(f"[decode] Fixed data length: {len(fixed_data)}")
+    t7 = time.time()
+    print(f"[perf] fix markers: {t7 - t6} sec")
+    
+    result = jpg_build(decoded_headers, fixed_data)
+    print(f"Total decode time: {time.time() - t0} sec")
+    return result
 
-# Example usage
 if __name__ == "__main__":
     cap = cv2.VideoCapture(PATH_TO_VIDEO)
     frame_count = 0
@@ -146,44 +186,25 @@ if __name__ == "__main__":
         success, frame = cap.read()
         if not success:
             break
-        # the original frame size
         h, w = frame.shape[:2]
-        print("--------------------------------")
-        print(f"original: {w}×{h}")
-        print("---------------------------------")
-
-        # resize to 320x240 if larger
-        TARGET_W, TARGET_H = 720, 480
-        frame_proc = cv2.resize(frame, (TARGET_W, TARGET_H))
-        start_time = time.time()
-        if FORMAT_IMAGE == 'jpg':
-            encode_param = [cv2.IMWRITE_JPEG_QUALITY, 30]
-            _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
-            full_bytes = encoded_image.tobytes()
-        elif FORMAT_IMAGE == 'webp':
-            encoded_image = encode_frame_to_webp(frame_proc, quality=30)
-            full_bytes = encoded_image
-        # print(f"Encoding took" + str(time.time() - start_time))
+        print(f"Original: {w}×{h}")
+        
+        frame_proc = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
+        encode_param = [cv2.IMWRITE_JPEG_QUALITY, 30, cv2.IMWRITE_JPEG_RST_INTERVAL, 1]
+        _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
+        headers, compressed = jpg_parse(encoded_image.tobytes())
+        
         try:
-            frame_bin = encode_udp_to_frame(full_bytes)
+            frame_bin = encode_udp_to_frame(headers, compressed)
             cv2.imwrite(f"encoded_{frame_count}.png", frame_bin)
             print(f"Encoded frame {frame_count} saved.")
             noisy = frame_bin.copy()
-            noise_mask = np.random.choice([0, 255], size=noisy.shape,
-                                            p=[0.97, 0.03]).astype(np.uint8) # 3% bit flips
+            noise_mask = np.random.choice([0, 255], size=noisy.shape, p=[0.99, 0.01]).astype(np.uint8) # 3% bit flips
             noisy ^= noise_mask
             decoded_data = decode_frame_to_udp(noisy)
-            start_decode_time = time.time()
-            if FORMAT_IMAGE == 'jpg':
-                with open(f"recovered_{frame_count}.jpg", "wb") as out_file:
-                    out_file.write(decoded_data)
-            elif FORMAT_IMAGE == 'webp':
-                decoded_frame = decode_webp_to_frame(decoded_data)
-                cv2.imwrite(f"recovered_{frame_count}.png", decoded_frame)
-            # print("the decode took: " + str(time.time() - start_decode_time))
-            print("-------------------------------")
-            print(f"Decoded matches: {decoded_data == full_bytes}")
-            print("-------------------------------")
-
+            with open(f"recovered_{frame_count}.jpg", "wb") as out_file:
+                out_file.write(decoded_data)
+            print(f"Decoded matches: {decoded_data == encoded_image.tobytes()}")
+        
         except ValueError as e:
             print(f"Error: {e}")
