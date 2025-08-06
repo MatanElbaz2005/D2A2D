@@ -10,7 +10,8 @@ from helpers import generate_prbs
 FRAME_WIDTH = 720
 FRAME_HEIGHT = 480  # NTSC
 ECC_SYMBOLS = 32
-CHIP_LENGTH_FOR_HEADERS = 3
+CHIP_LENGTH_FOR_HEADERS = 5
+CHIP_LENGTH_FOR_DATA = 2
 DATA_PRBS_POLY = [8, 2]
 FORMAT_IMAGE = 'jpg'
 MEMORY = [6]
@@ -27,7 +28,8 @@ DATA_SYNC_PATTERN = np.array([1, -1, 1, -1, 1, 1, -1, -1, 1, 1, 1, 1, 1], dtype=
 END_SYNC_PATTERN = np.array([-1, -1, -1, -1, -1, 1, 1, -1, -1, 1, -1, 1, -1, 1, 1, -1, 1, -1, -1, 1], dtype=np.int32)  # Extended pattern
 
 # PRBS for spreading (if enabled)
-DATA_PRBS = generate_prbs(CHIP_LENGTH_FOR_HEADERS, DATA_PRBS_POLY, 3) if USE_PRBS else None
+HEADERS_PRBS = generate_prbs(CHIP_LENGTH_FOR_HEADERS, DATA_PRBS_POLY, 3) if USE_PRBS else None
+DATA_PRBS = generate_prbs(CHIP_LENGTH_FOR_DATA, DATA_PRBS_POLY, 3) if USE_PRBS else None
 
 def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
     start_time = time.time()
@@ -49,7 +51,7 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
     
     if USE_PRBS:
         repeated_bits = np.repeat(header_bits_pm, CHIP_LENGTH_FOR_HEADERS)
-        tiled_prbs = np.tile(DATA_PRBS, len(header_bits))
+        tiled_prbs = np.tile(HEADERS_PRBS, len(header_bits))
         protected_headers = repeated_bits * tiled_prbs
         print(f"[encode] Using PRBS, protected headers length: {len(protected_headers)} bits")
     else:
@@ -59,12 +61,21 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
     
     data_bits = np.unpackbits(np.frombuffer(data, dtype=np.uint8))
     print(f"[encode] Data bits length: {len(data_bits)}")
-    
+
+    data_bits_pm = 2.0 * data_bits - 1
+    if USE_PRBS:
+        repeated_data_bits = np.repeat(data_bits_pm, CHIP_LENGTH_FOR_DATA)
+        tiled_prbs = np.tile(DATA_PRBS, len(data_bits))
+        protected_data = repeated_data_bits * tiled_prbs
+        print(f"[encode] Using PRBS, protected data length: {len(protected_data)} bits")
+    else:
+        protected_data = data_bits_pm
+
     full_stream = np.concatenate((
         HEADERS_SYNC_PATTERN,
         protected_headers,
         DATA_SYNC_PATTERN,
-        2.0 * data_bits - 1,
+        protected_data,
         END_SYNC_PATTERN
     ))
     print(f"[encode] Full stream length: {len(full_stream)} bits")
@@ -120,24 +131,25 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     print(f"[perf] extraction: {t3 - t2} sec")
     
     if USE_PRBS:
-        n_groups = len(protected_headers) // CHIP_LENGTH_FOR_HEADERS
-        chips = protected_headers[:n_groups * CHIP_LENGTH_FOR_HEADERS].reshape(-1, CHIP_LENGTH_FOR_HEADERS)
-        rx_bits_pm = np.dot(chips, DATA_PRBS) / CHIP_LENGTH_FOR_HEADERS
-        rx_bits = ((np.sign(rx_bits_pm) + 1) / 2).astype(np.uint8)
+        # Despread headers
+        n_groups_headers = len(protected_headers) // CHIP_LENGTH_FOR_HEADERS
+        chips_headers = protected_headers[:n_groups_headers * CHIP_LENGTH_FOR_HEADERS].reshape(-1, CHIP_LENGTH_FOR_HEADERS)
+        rx_bits_pm_headers = np.dot(chips_headers, HEADERS_PRBS) / CHIP_LENGTH_FOR_HEADERS
+        rx_bits_headers = ((np.sign(rx_bits_pm_headers) + 1) / 2).astype(np.uint8)
     else:
         n_groups = len(protected_headers) // 3
         chips = protected_headers[:n_groups * 3].reshape(-1, 3)
         patterns = np.array([[-1, 1, -1], [1, -1, 1]], dtype=np.int32)
         corr = np.dot(chips, patterns.T) / 3
-        rx_bits = (np.argmax(corr, axis=1)).astype(np.uint8)
-    print(f"[decode] Despread bits length: {len(rx_bits)}")
-    print(f"[decode] First 16 despread bits: {rx_bits[:16].tolist()}")
-    print(f"[decode] Last 16 despread bits: {rx_bits[-16:].tolist()}")
+        rx_bits_headers = (np.argmax(corr, axis=1)).astype(np.uint8)
+    print(f"[decode] Despread bits length: {len(rx_bits_headers)}")
+    print(f"[decode] First 16 despread bits: {rx_bits_headers[:16].tolist()}")
+    print(f"[decode] Last 16 despread bits: {rx_bits_headers[-16:].tolist()}")
     
     t4 = time.time()
     print(f"[perf] despreading: {t4 - t3} sec")
     
-    rx_bytes = np.packbits(rx_bits).tobytes()
+    rx_bytes = np.packbits(rx_bits_headers).tobytes()
     print(f"[decode] Packed bytes length: {len(rx_bytes)}")
     print(f"[decode] First 10 packed bytes: {rx_bytes[:10].hex()}")
     print(f"[decode] Last 10 packed bytes: {rx_bytes[-10:].hex()}")
@@ -149,7 +161,6 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
             t_rs = time.time()
             decoded_headers = bytes(rsc.decode(rx_bytes)[0])
             end_t_rs = time.time()
-
         except ReedSolomonError as e:
             raise ValueError(f"Header RS decoding failed: {e}")
     else:
@@ -165,10 +176,20 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
         raise ValueError(f"Invalid JPEG headers: start={decoded_headers[:2].hex()}, sos_index={sos_index}")
     print(f"[decode] SOS marker found at byte index: {sos_index}")
     
-    data = received_pm[data_start:data_end]
-    data_bits = ((data + 1) / 2).astype(np.uint8)
-    print(f"[decode] Data bits length: {len(data_bits)}")
-    data_bytes = np.packbits(data_bits).tobytes()
+    # Despread data
+    protected_data = received_pm[data_start:data_end]
+    print(f"[decode] Protected data length: {len(protected_data)} bits")
+    if USE_PRBS:
+        n_groups_data = len(protected_data) // CHIP_LENGTH_FOR_DATA
+        chips_data = protected_data[:n_groups_data * CHIP_LENGTH_FOR_DATA].reshape(-1, CHIP_LENGTH_FOR_DATA)
+        rx_bits_pm_data = np.dot(chips_data, DATA_PRBS) / CHIP_LENGTH_FOR_DATA
+        rx_bits_data = ((np.sign(rx_bits_pm_data) + 1) / 2).astype(np.uint8)
+    else:
+        rx_bits_data = ((protected_data + 1) / 2).astype(np.uint8)
+    print(f"[decode] Despread data bits length: {len(rx_bits_data)}")
+    print(f"[decode] First 16 despread data bits: {rx_bits_data[:16].tolist()}")
+    
+    data_bytes = np.packbits(rx_bits_data).tobytes()
     fixed_data = fix_false_markers(data_bytes)
     print(f"[decode] Fixed data length: {len(fixed_data)}")
     t7 = time.time()
