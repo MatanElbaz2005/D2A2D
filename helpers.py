@@ -92,3 +92,15 @@ def generate_prbs(length: int, poly: list[int], seed: int | None = None) -> np.n
         state = (state >> 1) | (feedback << (degree - 1))
 
     return out
+
+def block_interleave(data: bytes, rows: int) -> bytes:
+    cols = int(np.ceil(len(data) / rows))
+    padded = data + bytes(cols * rows - len(data))
+    matrix = np.frombuffer(padded, dtype=np.uint8).reshape(rows, cols)
+    return bytes(matrix.T.flatten()[:len(data)])
+
+def block_deinterleave(data: bytes, rows: int) -> bytes:
+    cols = int(np.ceil(len(data) / rows))
+    padded = data + bytes(cols * rows - len(data))
+    matrix = np.frombuffer(padded, dtype=np.uint8).reshape(cols, rows).T
+    return bytes(matrix.flatten()[:len(data)])
