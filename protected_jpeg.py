@@ -121,50 +121,62 @@ def fix_false_markers(compressed: bytes) -> bytes:
     return bytes(ba)
 
 
-# # Path to the input image (replace with your actual image path)
-# image_path = "/home/pi/Documents/matan/code/D2A2D/restored_4.jpg"
+# Path to the input image (replace with your actual image path)
+PATH_TO_VIDEO = "/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
+FRAME_WIDTH = 720
+FRAME_HEIGHT = 480
 
-# # Read the image
-# img = cv2.imread(image_path)
-# if img is None:
-#     raise ValueError(f"Failed to load image from {image_path}")
+cap = cv2.VideoCapture(PATH_TO_VIDEO)
+frame_count = 0
+while cap.isOpened() and frame_count < 4:
+    frame_count += 1
+    success, frame = cap.read()
+    if not success:
+        break
+    h, w = frame.shape[:2]
+    print(f"Original: {w}×{h}")
+    
+    frame_proc = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
 
-# # Encode to JPEG binary using OpenCV
-# start_time = time.time()
-# params = [int(cv2.IMWRITE_JPEG_RST_INTERVAL), 1]  # Adjust interval; smaller = more resilient but larger file
-# success, jpg_bytes = cv2.imencode('.jpg', img, params)
-# if not success:
-#     raise ValueError("Failed to encode image")
+    # Read the image
+    img = frame_proc.copy()
 
-# # Parse
-# start_parse = time.time()
-# header, compressed = jpg_parse(jpg_bytes.tobytes())
-# print(f"Parsed JPEG in {time.time() - start_parse} seconds")
-# noisy = np.frombuffer(compressed, dtype=np.uint8).copy()
+    # Encode to JPEG binary using OpenCV
+    start_time = time.time()
+    params = [(cv2.IMWRITE_JPEG_QUALITY), 30, int(cv2.IMWRITE_JPEG_RST_INTERVAL), 1]  # Adjust interval; smaller = more resilient but larger file
+    success, jpg_bytes = cv2.imencode('.jpg', img, params)
+    if not success:
+        raise ValueError("Failed to encode image")
 
-# noise_mask = np.random.choice([0, 255], size=noisy.shape,
-#                                             p=[0.99, 0.01]).astype(np.uint8) # 3% bit flips
-# noisy ^= noise_mask
+    # Parse
+    start_parse = time.time()
+    header, compressed = jpg_parse(jpg_bytes.tobytes())
+    print(f"Parsed JPEG in {time.time() - start_parse} seconds")
+    noisy = np.frombuffer(compressed, dtype=np.uint8).copy()
 
-# start_fix = time.time()
-# fixed_compressed = fix_false_markers_fast(noisy.tobytes())
-# print(f"Fixed false markers in {time.time() - start_fix} seconds")
+    noise_mask = np.random.choice([0, 255], size=noisy.shape,
+                                                p=[0.99, 0.01]).astype(np.uint8) # 3% bit flips
+    noisy ^= noise_mask
 
-# # if fixes:
-# #     print("Fixed false markers:", fixes)
+    start_fix = time.time()
+    fixed_compressed = fix_false_markers(noisy.tobytes())
+    print(f"Fixed false markers in {time.time() - start_fix} seconds")
 
-# # Build back
-# start_rebuild = time.time()
-# rebuilt_bytes = jpg_build(header, fixed_compressed)
-# print(f"Rebuilt JPEG in {time.time() - start_rebuild} seconds")
+    # if fixes:
+    #     print("Fixed false markers:", fixes)
 
-# # Decode back with OpenCV to verify
-# rebuilt_img = cv2.imdecode(np.frombuffer(rebuilt_bytes, np.uint8), cv2.IMREAD_COLOR)
-# print(f"Total processing time: {time.time() - start_time} seconds")
-# if rebuilt_img is None:
-#     raise ValueError("Failed to decode rebuilt image")
-# print("Rebuilt image shape:", rebuilt_img.shape)  # Should match original image shape
+    # Build back
+    start_rebuild = time.time()
+    rebuilt_bytes = jpg_build(header, fixed_compressed)
+    print(f"Rebuilt JPEG in {time.time() - start_rebuild} seconds")
 
-# # Save the rebuilt image to verify visually
-# cv2.imwrite("rebuilt_image.jpg", rebuilt_img)
-# print("Rebuilt image saved as 'rebuilt_image.jpg'")
+    # Decode back with OpenCV to verify
+    rebuilt_img = cv2.imdecode(np.frombuffer(rebuilt_bytes, np.uint8), cv2.IMREAD_COLOR)
+    print(f"Total processing time: {time.time() - start_time} seconds")
+    if rebuilt_img is None:
+        raise ValueError("Failed to decode rebuilt image")
+    print("Rebuilt image shape:", rebuilt_img.shape)  # Should match original image shape
+
+    # Save the rebuilt image to verify visually
+    cv2.imwrite("rebuilt_image.jpg", rebuilt_img)
+    # print("Rebuilt image saved as 'rebuilt_image.jpg'")
