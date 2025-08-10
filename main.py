@@ -1,5 +1,9 @@
 import numpy as np
-from reedsolo import RSCodec, ReedSolomonError
+try:
+    from creedsolo import RSCodec, ReedSolomonError
+except ImportError:
+    print("cant find creedsolo, using reedsolo instead")
+    from reedsolo import RSCodec, ReedSolomonError
 from scipy import signal
 import cv2
 import time
@@ -19,8 +23,10 @@ G_MATRIX = [[0o133, 0o171]]
 TB_LENGTH = 15
 PATH_TO_VIDEO = r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
 USE_PRBS = True
-USE_RS = False
+USE_RS = True
+perp_rsc_time = time.time()
 rsc = RSCodec(ECC_SYMBOLS)
+print("preper rs took " + str(time.time() - perp_rsc_time))
 
 # Sync patterns (Barker codes, ±1)
 HEADERS_SYNC_PATTERN = np.array([1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, -1, 1], dtype=np.int32)
@@ -35,7 +41,9 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
     start_time = time.time()
     
     if USE_RS:
-        coded_headers = rsc.encode(headers)
+        start_rs_encode = time.time()
+        coded_headers = rsc.encode(bytearray(headers))
+        print("rs encode took " + str(time.time() - start_rs_encode))
     else:
         coded_headers = headers
     
@@ -132,6 +140,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
             t_rs = time.time()
             decoded_headers = bytes(rsc.decode(rx_bytes)[0])
             end_t_rs = time.time()
+            print("rs decode time " + str(end_t_rs - t_rs))
         except ReedSolomonError as e:
             raise ValueError(f"Header RS decoding failed: {e}")
     else:
