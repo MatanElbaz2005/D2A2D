@@ -8,7 +8,7 @@ from helpers import generate_prbs
 # Config
 FRAME_WIDTH = 720
 FRAME_HEIGHT = 480  # NTSC
-PATH_TO_VIDEO = r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
+PATH_TO_VIDEO = r"./1572378-sd_960_540_24fps.mp4"
 
 # Sync patterns (Barker codes, ±1)
 HEADERS_SYNC_PATTERN = np.array([1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, -1, 1], dtype=np.int32)
