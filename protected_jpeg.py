@@ -41,7 +41,6 @@ def jpg_parse(jpg_bytes: bytes) -> tuple[bytes, bytes]:
             raise ValueError(f"Expected marker at position {i}")
         
         marker = jpg_bytes[i + 1]
-        print(f"[jpg_parse] Marker at {i}: FF {marker:02X}")
         header.extend(jpg_bytes[i:i+2])
         i += 2
         
@@ -52,14 +51,12 @@ def jpg_parse(jpg_bytes: bytes) -> tuple[bytes, bytes]:
             if i + 2 > jpg_length:
                 raise ValueError("Truncated length for SOS")
             length = int.from_bytes(jpg_bytes[i:i+2], 'big')
-            print(f"[jpg_parse] SOS length: {length}")
             if length < 2:
                 raise ValueError("Invalid length for SOS")
             if i + length > jpg_length:
                 raise ValueError("Truncated SOS header")
             header.extend(jpg_bytes[i:i + length])
             i += length
-            print(f"[jpg_parse] Header end: {bytes(header[-10:]).hex()}")
             break
         
         elif marker in range(0xd0, 0xd8) or marker == 0x01:
@@ -69,7 +66,6 @@ def jpg_parse(jpg_bytes: bytes) -> tuple[bytes, bytes]:
             if i + 2 > jpg_length:
                 raise ValueError("Truncated length")
             length = int.from_bytes(jpg_bytes[i:i+2], 'big')
-            print(f"[jpg_parse] Marker FF {marker:02X} length: {length}")
             if length < 2:
                 raise ValueError("Invalid length")
             if i + length > jpg_length:
@@ -92,9 +88,6 @@ def jpg_parse(jpg_bytes: bytes) -> tuple[bytes, bytes]:
     
     if i >= jpg_length:
         raise ValueError("No EOI found")
-    
-    print(f"[jpg_parse] Compressed data length: {len(compressed)} bytes")
-    print(f"[jpg_parse] First 10 compressed bytes: {bytes(compressed[:10]).hex()}")
     
     if i + 2 < jpg_length:
         print("Warning: There is data after EOI")
