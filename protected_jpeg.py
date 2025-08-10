@@ -270,6 +270,8 @@ while cap.isOpened() and frame_count < 4:
     # Parse
     start_parse = time.time()
     header, compressed = jpg_parse(jpg_bytes.tobytes())
+    print("compressed length is: " + str(len(compressed)))
+    print("compressed first 10 vals are: " + str(compressed[:10].hex()))
 
     # Encode to frame
     HEADERS_SYNC_PATTERN, protected_headers, DATA_SYNC_PATTERN, protected_data, END_SYNC_PATTERN = encode_udp_to_frame(header, compressed)
@@ -293,8 +295,9 @@ while cap.isOpened() and frame_count < 4:
 
     print(f"Parsed JPEG in {time.time() - start_parse} seconds")
     noisy = protected_data.copy()
-    noise_mask = np.random.choice([-1, 1], size=noisy.shape, p=[0.99, 0.01]).astype(np.int32)  # 1% bit flips on ±1
-    noisy = noisy * noise_mask
+    noisy = ((noisy + 1) / 2 * 255).astype(np.uint8)  # Maps -1 to 0, 1 to 255
+    noise_mask = np.random.choice([0, 255], size=noisy.shape, p=[0.99, 0.01]).astype(np.uint8)  # 1% bit flips
+    noisy ^= noise_mask
 
 
     full_stream_final = np.concatenate((
@@ -320,6 +323,8 @@ while cap.isOpened() and frame_count < 4:
     # Decode from frame
     start_decode = time.time()
     data_bytes, decoded_headers = decode_frame_to_udp(frame_final)
+    print("data_bytes length is: " + str(len(data_bytes)))
+    print("data_bytes first 10 vals are: " + str(data_bytes[:10].hex()))
 
     start_fix = time.time()
     fixed_compressed = fix_false_markers(data_bytes)
