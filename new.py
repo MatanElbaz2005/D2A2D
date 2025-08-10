@@ -10,15 +10,15 @@ from helpers import generate_prbs
 FRAME_WIDTH = 720
 FRAME_HEIGHT = 480  # NTSC
 ECC_SYMBOLS = 32
-CHIP_LENGTH_FOR_HEADERS = 5
-CHIP_LENGTH_FOR_DATA = 3
+CHIP_LENGTH_FOR_HEADERS = 1
+CHIP_LENGTH_FOR_DATA = 1
 DATA_PRBS_POLY = [8, 2]
 FORMAT_IMAGE = 'jpg'
 MEMORY = [6]
 G_MATRIX = [[0o133, 0o171]]
 TB_LENGTH = 15
 PATH_TO_VIDEO = r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
-USE_PRBS = False
+USE_PRBS = True
 USE_RS = False
 rsc = RSCodec(ECC_SYMBOLS)
 
@@ -47,7 +47,7 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
     
     header_bits = np.unpackbits(np.frombuffer(coded_headers, dtype=np.uint8))
     print(f"[encode] Header bits length: {len(header_bits)}")
-    header_bits_pm = 2.0 * header_bits - 1
+    header_bits_pm = header_bits.astype(np.int8) * 2 - 1
     
     if USE_PRBS:
         repeated_bits = np.repeat(header_bits_pm, CHIP_LENGTH_FOR_HEADERS)
@@ -62,7 +62,7 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
     data_bits = np.unpackbits(np.frombuffer(data, dtype=np.uint8))
     print(f"[encode] Data bits length: {len(data_bits)}")
 
-    data_bits_pm = 2.0 * data_bits - 1
+    data_bits_pm = data_bits.astype(np.int8) * 2 - 1
     if USE_PRBS:
         repeated_data_bits = np.repeat(data_bits_pm, CHIP_LENGTH_FOR_DATA)
         tiled_prbs = np.tile(DATA_PRBS, len(data_bits))
@@ -212,18 +212,18 @@ if __name__ == "__main__":
         print(f"Original: {w}×{h}")
         
         frame_proc = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
-        encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 30, cv2.IMWRITE_JPEG_RST_INTERVAL, 1]
+        encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 75, cv2.IMWRITE_JPEG_RST_INTERVAL, 1]
         _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
         headers, compressed = jpg_parse(encoded_image.tobytes())
         
         try:
             headers_sync_pattern, protected_headers, data_sync_pattern, protected_data, end_pattern  = encode_udp_to_frame(headers, compressed)
             full_stream = np.concatenate((
-                HEADERS_SYNC_PATTERN,
-                protected_headers,
-                DATA_SYNC_PATTERN,
-                protected_data,
-                END_SYNC_PATTERN
+                HEADERS_SYNC_PATTERN.astype(np.int8),
+                protected_headers.astype(np.int8),
+                DATA_SYNC_PATTERN.astype(np.int8),
+                protected_data.astype(np.int8),
+                END_SYNC_PATTERN.astype(np.int8)
             ))
             print(f"[encode] Full stream length: {len(full_stream)} bits")
             
@@ -231,33 +231,35 @@ if __name__ == "__main__":
             if len(full_stream) > total_pixels:
                 raise ValueError(f"Data too large: {len(full_stream)} bits > {total_pixels} pixels")
             
-            full_stream = ((full_stream + 1) / 2 * 255).astype(np.uint8)
-            full_stream = np.pad(full_stream, (0, total_pixels - len(full_stream)), 'constant')
-            frame = full_stream.reshape((FRAME_HEIGHT, FRAME_WIDTH))
+            full_u8 = (((full_stream + 1) // 2).astype(np.uint8)) * 255
+            if full_u8.size < total_pixels:
+                full_u8 = np.pad(full_u8, (0, total_pixels - full_u8.size), mode='constant')
+            frame = full_u8.reshape((FRAME_HEIGHT, FRAME_WIDTH))
             cv2.imwrite(f"encoded_{frame_count}.png", frame)
             print(f"Encoded frame {frame_count} saved.")
 
             # add noise
-            noisy = protected_data.copy()
-            noisy = ((noisy + 1) / 2 * 255).astype(np.uint8)  # Maps -1 to 0, 1 to 255
-            noise_mask = np.random.choice([0, 255], size=noisy.shape, p=[0.99, 0.01]).astype(np.uint8) # 3% bit flips
-            noisy ^= noise_mask
+            p = 0.01
+            noisy = protected_data.astype(np.int8).copy()
+            flip_mask = (np.random.rand(noisy.size) < p)
+            noisy[flip_mask] *= -1
 
-            full_stream = np.concatenate((
-                HEADERS_SYNC_PATTERN,
-                protected_headers,
-                DATA_SYNC_PATTERN,
+            full_pm = np.concatenate((
+                HEADERS_SYNC_PATTERN.astype(np.int8),
+                protected_headers.astype(np.int8),
+                DATA_SYNC_PATTERN.astype(np.int8),
                 noisy,
-                END_SYNC_PATTERN
+                END_SYNC_PATTERN.astype(np.int8)
             ))
             
             total_pixels = FRAME_WIDTH * FRAME_HEIGHT
-            if len(full_stream) > total_pixels:
-                raise ValueError(f"Data too large: {len(full_stream)} bits > {total_pixels} pixels")
-            
-            full_stream = ((full_stream + 1) / 2 * 255).astype(np.uint8)
-            full_stream = np.pad(full_stream, (0, total_pixels - len(full_stream)), 'constant')
-            frame_final = full_stream.reshape((FRAME_HEIGHT, FRAME_WIDTH))
+            if full_pm.size > total_pixels:
+                raise ValueError(f"Data too large: {full_pm.size} bits > {total_pixels} pixels")
+
+            full_u8_noisy = (((full_pm + 1) // 2).astype(np.uint8)) * 255
+            if full_u8_noisy.size < total_pixels:
+                full_u8_noisy = np.pad(full_u8_noisy, (0, total_pixels - full_u8_noisy.size), mode='constant')
+            frame_final = full_u8_noisy.reshape((FRAME_HEIGHT, FRAME_WIDTH))
 
             # decode
             decoded_data = decode_frame_to_udp(frame_final)
