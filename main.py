@@ -34,40 +34,29 @@ DATA_PRBS = generate_prbs(CHIP_LENGTH_FOR_DATA, DATA_PRBS_POLY, 3) if USE_PRBS e
 def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
     start_time = time.time()
     
-    print(f"[encode] Header size: {len(headers)} bytes")
-    print(f"[encode] First 10 header bytes: {headers[:10].hex()}")
-    print(f"[encode] Last 10 header bytes: {headers[-10:].hex()}")
-    
     if USE_RS:
         coded_headers = rsc.encode(headers)
-        print(f"[encode] RS-coded header size: {len(coded_headers)} bytes")
     else:
         coded_headers = headers
-        print(f"[encode] No RS, header size: {len(coded_headers)} bytes")
     
     header_bits = np.unpackbits(np.frombuffer(coded_headers, dtype=np.uint8))
-    print(f"[encode] Header bits length: {len(header_bits)}")
     header_bits_pm = header_bits.astype(np.int8) * 2 - 1
     
     if USE_PRBS:
         repeated_bits = np.repeat(header_bits_pm, CHIP_LENGTH_FOR_HEADERS)
         tiled_prbs = np.tile(HEADERS_PRBS, len(header_bits))
         protected_headers = repeated_bits * tiled_prbs
-        print(f"[encode] Using PRBS, protected headers length: {len(protected_headers)} bits")
     else:
         mapping = {0: np.array([-1, 1, -1]), 1: np.array([1, -1, 1])}
         protected_headers = np.concatenate([mapping[bit] for bit in header_bits])
-        print(f"[encode] Using 3-bit mapping, protected headers length: {len(protected_headers)} bits")
     
     data_bits = np.unpackbits(np.frombuffer(data, dtype=np.uint8))
-    print(f"[encode] Data bits length: {len(data_bits)}")
 
     data_bits_pm = data_bits.astype(np.int8) * 2 - 1
     if USE_PRBS:
         repeated_data_bits = np.repeat(data_bits_pm, CHIP_LENGTH_FOR_DATA)
         tiled_prbs = np.tile(DATA_PRBS, len(data_bits))
         protected_data = repeated_data_bits * tiled_prbs
-        print(f"[encode] Using PRBS, protected data length: {len(protected_data)} bits")
     else:
         protected_data = data_bits_pm
 
@@ -100,16 +89,11 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     
     received_pm = 2 * (frame.ravel() > 127).astype(np.int32) - 1
     t1 = time.time()
-    print(f"[perf] threshold→±1: {t1 - t0} sec")
     
     corr_headers = signal.correlate(received_pm, HEADERS_SYNC_PATTERN, mode='valid') / len(HEADERS_SYNC_PATTERN)
     corr_data = signal.correlate(received_pm, DATA_SYNC_PATTERN, mode='valid') / len(DATA_SYNC_PATTERN)
     corr_end = signal.correlate(received_pm, END_SYNC_PATTERN, mode='valid') / len(END_SYNC_PATTERN)
     t2 = time.time()
-    print(f"[perf] correlations: {t2 - t1} sec")
-    print(f"[decode] Header sync max corr: {np.max(corr_headers)} at pos {np.argmax(corr_headers)}")
-    print(f"[decode] Data sync max corr: {np.max(corr_data)} at pos {np.argmax(corr_data)}")
-    print(f"[decode] End sync max corr: {np.max(corr_end)} at pos {np.argmax(corr_end)}")
     
     if np.max(corr_headers) < corr_threshold or np.max(corr_data) < corr_threshold or np.max(corr_end) < corr_threshold:
         raise ValueError(f"Sync not detected: headers={np.max(corr_headers)}, data={np.max(corr_data)}, end={np.max(corr_end)}")
@@ -120,16 +104,11 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     
     if not (headers_start < data_start < data_end):
         raise ValueError(f"Invalid sync pattern order: headers_start={headers_start}, data_start={data_start}, data_end={data_end}")
-    print(f"[decode] Headers range: {headers_start}:{data_start - len(DATA_SYNC_PATTERN)}")
-    print(f"[decode] Data range: {data_start}:{data_end}")
     
     expected_data_bits = (data_end - data_start) * 8  # Approximate based on pixel range
-    print(f"[decode] Expected data bits (approx): {expected_data_bits}")
     
     protected_headers = received_pm[headers_start:data_start - len(DATA_SYNC_PATTERN)]
-    print(f"[decode] Protected headers length: {len(protected_headers)} bits")
     t3 = time.time()
-    print(f"[perf] extraction: {t3 - t2} sec")
     
     if USE_PRBS:
         # Despread headers
@@ -143,19 +122,10 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
         patterns = np.array([[-1, 1, -1], [1, -1, 1]], dtype=np.int32)
         corr = np.dot(chips, patterns.T) / 3
         rx_bits_headers = (np.argmax(corr, axis=1)).astype(np.uint8)
-    print(f"[decode] Despread bits length: {len(rx_bits_headers)}")
-    print(f"[decode] First 16 despread bits: {rx_bits_headers[:16].tolist()}")
-    print(f"[decode] Last 16 despread bits: {rx_bits_headers[-16:].tolist()}")
     
     t4 = time.time()
-    print(f"[perf] despreading: {t4 - t3} sec")
-    
     rx_bytes = np.packbits(rx_bits_headers).tobytes()
-    print(f"[decode] Packed bytes length: {len(rx_bytes)}")
-    print(f"[decode] First 10 packed bytes: {rx_bytes[:10].hex()}")
-    print(f"[decode] Last 10 packed bytes: {rx_bytes[-10:].hex()}")
     t5 = time.time()
-    print(f"[perf] packbits: {t5 - t4} sec")
     
     if USE_RS:
         try:
@@ -166,20 +136,15 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
             raise ValueError(f"Header RS decoding failed: {e}")
     else:
         decoded_headers = rx_bytes
-    print(f"[decode] Decoded headers length: {len(decoded_headers)}")
-    print(f"[decode] First 10 decoded header bytes: {decoded_headers[:10].hex()}")
-    print(f"[decode] Last 10 decoded header bytes: {decoded_headers[-10:].hex()}")
     t6 = time.time()
     # print(f"[perf] RS decode: {end_t_rs - t_rs} sec")
     
     sos_index = decoded_headers.find(b'\xff\xda')
     if not (decoded_headers.startswith(b'\xff\xd8') and sos_index != -1):
         raise ValueError(f"Invalid JPEG headers: start={decoded_headers[:2].hex()}, sos_index={sos_index}")
-    print(f"[decode] SOS marker found at byte index: {sos_index}")
     
     # Despread data
     protected_data = received_pm[data_start:data_end]
-    print(f"[decode] Protected data length: {len(protected_data)} bits")
     if USE_PRBS:
         n_groups_data = len(protected_data) // CHIP_LENGTH_FOR_DATA
         chips_data = protected_data[:n_groups_data * CHIP_LENGTH_FOR_DATA].reshape(-1, CHIP_LENGTH_FOR_DATA)
@@ -187,14 +152,10 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
         rx_bits_data = ((np.sign(rx_bits_pm_data) + 1) / 2).astype(np.uint8)
     else:
         rx_bits_data = ((protected_data + 1) / 2).astype(np.uint8)
-    print(f"[decode] Despread data bits length: {len(rx_bits_data)}")
-    print(f"[decode] First 16 despread data bits: {rx_bits_data[:16].tolist()}")
     
     data_bytes = np.packbits(rx_bits_data).tobytes()
     fixed_data = fix_false_markers(data_bytes)
-    print(f"[decode] Fixed data length: {len(fixed_data)}")
     t7 = time.time()
-    print(f"[perf] fix markers: {t7 - t6} sec")
     
     result = jpg_build(decoded_headers, fixed_data)
     print(f"Total decode time: {time.time() - t0} sec")
