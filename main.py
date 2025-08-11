@@ -22,8 +22,15 @@ MEMORY = [6]
 G_MATRIX = [[0o133, 0o171]]
 TB_LENGTH = 15
 PATH_TO_VIDEO = r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
-USE_PRBS = True
-USE_RS = True
+
+# PRBS flags
+USE_PRBS_FOR_HEADERS = True
+USE_PRBS_FOR_DATA = False
+
+# RS flags
+USE_RS_FOR_HEADERS = True
+USE_RS_FOR_DATA = True
+
 perp_rsc_time = time.time()
 rsc = RSCodec(ECC_SYMBOLS)
 print("preper rs took " + str(time.time() - perp_rsc_time))
@@ -34,23 +41,23 @@ DATA_SYNC_PATTERN = np.array([1, -1, 1, -1, 1, 1, -1, -1, 1, 1, 1, 1, 1], dtype=
 END_SYNC_PATTERN = np.array([-1, -1, -1, -1, -1, 1, 1, -1, -1, 1, -1, 1, -1, 1, 1, -1, 1, -1, -1, 1], dtype=np.int32)  # Extended pattern
 
 # PRBS for spreading (if enabled)
-HEADERS_PRBS = generate_prbs(CHIP_LENGTH_FOR_HEADERS, DATA_PRBS_POLY, 3) if USE_PRBS else None
-DATA_PRBS = generate_prbs(CHIP_LENGTH_FOR_DATA, DATA_PRBS_POLY, 3) if USE_PRBS else None
+HEADERS_PRBS = generate_prbs(CHIP_LENGTH_FOR_HEADERS, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_HEADERS else None
+DATA_PRBS = generate_prbs(CHIP_LENGTH_FOR_DATA, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_DATA else None
 
 def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
     start_time = time.time()
     
-    if USE_RS:
-        start_rs_encode = time.time()
+    if USE_RS_FOR_HEADERS:
+        start_rs_headers_encode = time.time()
         coded_headers = rsc.encode(bytearray(headers))
-        print("rs encode took " + str(time.time() - start_rs_encode))
+        print("rs encode for headers took " + str(time.time() - start_rs_headers_encode))
     else:
         coded_headers = headers
     
     header_bits = np.unpackbits(np.frombuffer(coded_headers, dtype=np.uint8))
     header_bits_pm = header_bits.astype(np.int8) * 2 - 1
     
-    if USE_PRBS:
+    if USE_PRBS_FOR_HEADERS:
         repeated_bits = np.repeat(header_bits_pm, CHIP_LENGTH_FOR_HEADERS)
         tiled_prbs = np.tile(HEADERS_PRBS, len(header_bits))
         protected_headers = repeated_bits * tiled_prbs
@@ -58,10 +65,17 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
         mapping = {0: np.array([-1, 1, -1]), 1: np.array([1, -1, 1])}
         protected_headers = np.concatenate([mapping[bit] for bit in header_bits])
     
-    data_bits = np.unpackbits(np.frombuffer(data, dtype=np.uint8))
-
+    if USE_RS_FOR_DATA:
+        start_rs_data_encode = time.time()
+        coded_data = rsc.encode(bytearray(data))
+        print("rs encode took " + str(time.time() - start_rs_data_encode))
+    else:
+        coded_data = data
+    
+    data_bits = np.unpackbits(np.frombuffer(coded_data, dtype=np.uint8))
     data_bits_pm = data_bits.astype(np.int8) * 2 - 1
-    if USE_PRBS:
+    
+    if USE_PRBS_FOR_DATA:
         repeated_data_bits = np.repeat(data_bits_pm, CHIP_LENGTH_FOR_DATA)
         tiled_prbs = np.tile(DATA_PRBS, len(data_bits))
         protected_data = repeated_data_bits * tiled_prbs
@@ -118,7 +132,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     protected_headers = received_pm[headers_start:data_start - len(DATA_SYNC_PATTERN)]
     t3 = time.time()
     
-    if USE_PRBS:
+    if USE_PRBS_FOR_HEADERS:
         # Despread headers
         n_groups_headers = len(protected_headers) // CHIP_LENGTH_FOR_HEADERS
         chips_headers = protected_headers[:n_groups_headers * CHIP_LENGTH_FOR_HEADERS].reshape(-1, CHIP_LENGTH_FOR_HEADERS)
@@ -135,12 +149,12 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     rx_bytes = np.packbits(rx_bits_headers).tobytes()
     t5 = time.time()
     
-    if USE_RS:
+    if USE_RS_FOR_HEADERS:
         try:
-            t_rs = time.time()
+            t_rs_headers = time.time()
             decoded_headers = bytes(rsc.decode(rx_bytes)[0])
-            end_t_rs = time.time()
-            print("rs decode time " + str(end_t_rs - t_rs))
+            end_t_rs_headers = time.time()
+            print("rs decode time " + str(end_t_rs_headers - t_rs_headers))
         except ReedSolomonError as e:
             raise ValueError(f"Header RS decoding failed: {e}")
     else:
@@ -154,7 +168,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     
     # Despread data
     protected_data = received_pm[data_start:data_end]
-    if USE_PRBS:
+    if USE_PRBS_FOR_DATA:
         n_groups_data = len(protected_data) // CHIP_LENGTH_FOR_DATA
         chips_data = protected_data[:n_groups_data * CHIP_LENGTH_FOR_DATA].reshape(-1, CHIP_LENGTH_FOR_DATA)
         rx_bits_pm_data = np.dot(chips_data, DATA_PRBS) / CHIP_LENGTH_FOR_DATA
@@ -163,7 +177,19 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
         rx_bits_data = ((protected_data + 1) / 2).astype(np.uint8)
     
     data_bytes = np.packbits(rx_bits_data).tobytes()
-    fixed_data = fix_false_markers(data_bytes)
+    
+    if USE_RS_FOR_DATA:
+        try:
+            t_rs_data = time.time()
+            decoded_data = bytes(rsc.decode(data_bytes)[0])
+            end_t_rs_data = time.time()
+            print("rs decode time " + str(end_t_rs_data - t_rs_data))
+        except ReedSolomonError as e:
+            raise ValueError(f"Header RS decoding failed: {e}")
+    else:
+        decoded_data = data_bytes
+    
+    fixed_data = fix_false_markers(decoded_data)
     t7 = time.time()
     
     result = jpg_build(decoded_headers, fixed_data)
