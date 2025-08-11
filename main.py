@@ -146,7 +146,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     if USE_RS_FOR_HEADERS:
         try:
             t_rs_headers = time.time()
-            decoded_headers = bytes(rsc.decode(rx_bytes)[0])
+            decoded_headers = bytes(rsc.decode(bytearray(rx_bytes))[0])
             end_t_rs_headers = time.time()
             print("rs decode for headers time " + str(end_t_rs_headers - t_rs_headers))
         except ReedSolomonError as e:
@@ -175,7 +175,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     if USE_RS_FOR_DATA:
         try:
             t_rs_data = time.time()
-            decoded_data = bytes(rsc.decode(data_bytes)[0])
+            decoded_data = bytes(rsc.decode(bytearray(data_bytes))[0])
             end_t_rs_data = time.time()
             print("rs decode for data time " + str(end_t_rs_data - t_rs_data))
         except ReedSolomonError as e:
