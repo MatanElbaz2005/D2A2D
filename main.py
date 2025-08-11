@@ -68,7 +68,7 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
     if USE_RS_FOR_DATA:
         start_rs_data_encode = time.time()
         coded_data = rsc.encode(bytearray(data))
-        print("rs encode took " + str(time.time() - start_rs_data_encode))
+        print("rs encode for data took " + str(time.time() - start_rs_data_encode))
     else:
         coded_data = data
     
@@ -148,7 +148,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
             t_rs_headers = time.time()
             decoded_headers = bytes(rsc.decode(rx_bytes)[0])
             end_t_rs_headers = time.time()
-            print("rs decode time " + str(end_t_rs_headers - t_rs_headers))
+            print("rs decode for headers time " + str(end_t_rs_headers - t_rs_headers))
         except ReedSolomonError as e:
             raise ValueError(f"Header RS decoding failed: {e}")
     else:
@@ -177,7 +177,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
             t_rs_data = time.time()
             decoded_data = bytes(rsc.decode(data_bytes)[0])
             end_t_rs_data = time.time()
-            print("rs decode time " + str(end_t_rs_data - t_rs_data))
+            print("rs decode for data time " + str(end_t_rs_data - t_rs_data))
         except ReedSolomonError as e:
             raise ValueError(f"Header RS decoding failed: {e}")
     else:
