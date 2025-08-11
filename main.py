@@ -14,6 +14,7 @@ from helpers import generate_prbs
 FRAME_WIDTH = 720
 FRAME_HEIGHT = 480  # NTSC
 ECC_SYMBOLS = 32
+CHUNK_BYTES = 128
 CHIP_LENGTH_FOR_HEADERS = 3
 CHIP_LENGTH_FOR_DATA = 1
 DATA_PRBS_POLY = [8, 2]
@@ -21,7 +22,7 @@ FORMAT_IMAGE = 'jpg'
 MEMORY = [6]
 G_MATRIX = [[0o133, 0o171]]
 TB_LENGTH = 15
-PATH_TO_VIDEO = r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
+PATH_TO_VIDEO = r"C:\Users\matan\OneDrive\מסמכים\Matan\D2A2D\1572378-sd_960_540_24fps.mp4"
 
 # PRBS flags
 USE_PRBS_FOR_HEADERS = True
@@ -67,10 +68,15 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
     
     if USE_RS_FOR_DATA:
         start_rs_data_encode = time.time()
-        coded_data = rsc.encode(bytearray(data))
-        print("rs encode for data took " + str(time.time() - start_rs_data_encode))
+        coded_blocks = []
+        for i in range(0, len(data), CHUNK_BYTES):
+            blk = data[i:i+CHUNK_BYTES]
+            coded_blocks.append(rsc.encode(bytearray(blk))) 
+        coded_data = b"".join(coded_blocks)
+        print("rs encode (chunked) took " + str(time.time() - start_rs_data_encode))
     else:
         coded_data = data
+
     
     data_bits = np.unpackbits(np.frombuffer(coded_data, dtype=np.uint8))
     data_bits_pm = data_bits.astype(np.int8) * 2 - 1
@@ -173,13 +179,28 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     data_bytes = np.packbits(rx_bits_data).tobytes()
     
     if USE_RS_FOR_DATA:
-        try:
-            t_rs_data = time.time()
-            decoded_data = bytes(rsc.decode(bytearray(data_bytes))[0])
-            end_t_rs_data = time.time()
-            print("rs decode for data time " + str(end_t_rs_data - t_rs_data))
-        except ReedSolomonError as e:
-            raise ValueError(f"Header RS decoding failed: {e}")
+        t_rs_data = time.time()
+        decoded_chunks = []
+        i = 0
+        N = CHUNK_BYTES + ECC_SYMBOLS
+        while i + N <= len(data_bytes):
+            blk = data_bytes[i:i+N]
+            try:
+                decoded_chunks.append(bytes(rsc.decode(bytearray(blk))[0]))
+            except ReedSolomonError:
+                # replace with black/zero payload for this chunk
+                decoded_chunks.append(bytes([0]) * CHUNK_BYTES)
+            i += N
+        # last (possibly shorter) block
+        if i < len(data_bytes):
+            blk = data_bytes[i:]
+            try:
+                decoded_chunks.append(bytes(rsc.decode(bytearray(blk))[0]))
+            except ReedSolomonError:
+                k_last = max(0, len(blk) - ECC_SYMBOLS)
+                decoded_chunks.append(bytes([0]) * k_last)
+        decoded_data = b"".join(decoded_chunks)
+        print("rs decode (chunked) took " + str(time.time() - t_rs_data))
     else:
         decoded_data = data_bytes
     
