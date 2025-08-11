@@ -14,7 +14,7 @@ from helpers import generate_prbs
 FRAME_WIDTH = 720
 FRAME_HEIGHT = 480  # NTSC
 ECC_SYMBOLS = 32
-CHIP_LENGTH_FOR_HEADERS = 1
+CHIP_LENGTH_FOR_HEADERS = 3
 CHIP_LENGTH_FOR_DATA = 1
 DATA_PRBS_POLY = [8, 2]
 FORMAT_IMAGE = 'jpg'
@@ -82,27 +82,21 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
     else:
         protected_data = data_bits_pm
 
-    return HEADERS_SYNC_PATTERN, protected_headers, DATA_SYNC_PATTERN, protected_data, END_SYNC_PATTERN
-    # full_stream = np.concatenate((
-    #     HEADERS_SYNC_PATTERN,
-    #     protected_headers,
-    #     DATA_SYNC_PATTERN,
-    #     protected_data,
-    #     END_SYNC_PATTERN
-    # ))
-    # print(f"[encode] Full stream length: {len(full_stream)} bits")
+    full_stream = np.concatenate((HEADERS_SYNC_PATTERN, protected_headers, DATA_SYNC_PATTERN, protected_data, END_SYNC_PATTERN))
+    print(f"[encode] Full stream length: {len(full_stream)} bits")
     
-    # total_pixels = FRAME_WIDTH * FRAME_HEIGHT
-    # if len(full_stream) > total_pixels:
-    #     raise ValueError(f"Data too large: {len(full_stream)} bits > {total_pixels} pixels")
+    total_pixels = FRAME_WIDTH * FRAME_HEIGHT
+    if len(full_stream) > total_pixels:
+        raise ValueError(f"Data too large: {len(full_stream)} bits > {total_pixels} pixels")
     
-    # full_stream = ((full_stream + 1) / 2 * 255).astype(np.uint8)
-    # full_stream = np.pad(full_stream, (0, total_pixels - len(full_stream)), 'constant')
-    # frame = full_stream.reshape((FRAME_HEIGHT, FRAME_WIDTH))
+    full_u8 = (((full_stream + 1) // 2).astype(np.uint8)) * 255
+    if full_u8.size < total_pixels:
+        full_u8 = np.pad(full_u8, (0, total_pixels - full_u8.size), mode='constant')
+    frame = full_u8.reshape((FRAME_HEIGHT, FRAME_WIDTH))
     
-    # print(f"[encode] Frame shape: {frame.shape}")
-    # print(f"Encode took: {time.time() - start_time} sec")
-    # return frame
+    print(f"[encode] Frame shape: {frame.shape}")
+    print(f"Encode took: {time.time() - start_time} sec")
+    return frame
 
 def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes:
     t0 = time.time()
@@ -213,52 +207,21 @@ if __name__ == "__main__":
         headers, compressed = jpg_parse(encoded_image.tobytes())
         
         try:
-            headers_sync_pattern, protected_headers, data_sync_pattern, protected_data, end_pattern  = encode_udp_to_frame(headers, compressed)
-            full_stream = np.concatenate((
-                HEADERS_SYNC_PATTERN.astype(np.int8),
-                protected_headers.astype(np.int8),
-                DATA_SYNC_PATTERN.astype(np.int8),
-                protected_data.astype(np.int8),
-                END_SYNC_PATTERN.astype(np.int8)
-            ))
-            print(f"[encode] Full stream length: {len(full_stream)} bits")
+            # encode
+            frame  = encode_udp_to_frame(headers, compressed)
             
-            total_pixels = FRAME_WIDTH * FRAME_HEIGHT
-            if len(full_stream) > total_pixels:
-                raise ValueError(f"Data too large: {len(full_stream)} bits > {total_pixels} pixels")
-            
-            full_u8 = (((full_stream + 1) // 2).astype(np.uint8)) * 255
-            if full_u8.size < total_pixels:
-                full_u8 = np.pad(full_u8, (0, total_pixels - full_u8.size), mode='constant')
-            frame = full_u8.reshape((FRAME_HEIGHT, FRAME_WIDTH))
+            # save the encoded frame
             cv2.imwrite(f"encoded_{frame_count}.png", frame)
             print(f"Encoded frame {frame_count} saved.")
 
             # add noise
             p = 0.01
-            noisy = protected_data.astype(np.int8).copy()
-            flip_mask = (np.random.rand(noisy.size) < p)
-            noisy[flip_mask] *= -1
-
-            full_pm = np.concatenate((
-                HEADERS_SYNC_PATTERN.astype(np.int8),
-                protected_headers.astype(np.int8),
-                DATA_SYNC_PATTERN.astype(np.int8),
-                noisy,
-                END_SYNC_PATTERN.astype(np.int8)
-            ))
-            
-            total_pixels = FRAME_WIDTH * FRAME_HEIGHT
-            if full_pm.size > total_pixels:
-                raise ValueError(f"Data too large: {full_pm.size} bits > {total_pixels} pixels")
-
-            full_u8_noisy = (((full_pm + 1) // 2).astype(np.uint8)) * 255
-            if full_u8_noisy.size < total_pixels:
-                full_u8_noisy = np.pad(full_u8_noisy, (0, total_pixels - full_u8_noisy.size), mode='constant')
-            frame_final = full_u8_noisy.reshape((FRAME_HEIGHT, FRAME_WIDTH))
+            noisy = frame.copy()
+            flip_mask = (np.random.rand(*noisy.shape) < p)
+            noisy[flip_mask] ^= np.uint8(255)
 
             # decode
-            decoded_data = decode_frame_to_udp(frame_final)
+            decoded_data = decode_frame_to_udp(noisy)
             with open(f"recovered_{frame_count}.jpg", "wb") as out_file:
                 out_file.write(decoded_data)
             print(f"Decoded matches: {decoded_data == encoded_image.tobytes()}")
