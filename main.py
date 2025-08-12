@@ -223,7 +223,7 @@ if __name__ == "__main__":
         print(f"Original: {w}×{h}")
         
         frame_proc = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
-        encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 75, cv2.IMWRITE_JPEG_RST_INTERVAL, 1]
+        encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 70, cv2.IMWRITE_JPEG_RST_INTERVAL, 1]
         _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
         headers, compressed = jpg_parse(encoded_image.tobytes())
         
