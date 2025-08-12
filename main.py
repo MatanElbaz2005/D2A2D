@@ -8,7 +8,7 @@ from scipy import signal
 import cv2
 import time
 from protected_jpeg import jpg_parse, jpg_build, fix_false_markers
-from helpers import generate_prbs
+from helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127
 
 # Config
 FRAME_WIDTH = 720
@@ -22,7 +22,7 @@ FORMAT_IMAGE = 'jpg'
 MEMORY = [6]
 G_MATRIX = [[0o133, 0o171]]
 TB_LENGTH = 15
-PATH_TO_VIDEO = r"C:\Users\matan\OneDrive\מסמכים\Matan\D2A2D\1572378-sd_960_540_24fps.mp4"
+PATH_TO_VIDEO = r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
 
 # PRBS flags
 USE_PRBS_FOR_HEADERS = True
@@ -36,10 +36,10 @@ perp_rsc_time = time.time()
 rsc = RSCodec(ECC_SYMBOLS)
 print("preper rs took " + str(time.time() - perp_rsc_time))
 
-# Sync patterns (Barker codes, ±1)
-HEADERS_SYNC_PATTERN = np.array([1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, -1, 1], dtype=np.int32)
-DATA_SYNC_PATTERN = np.array([1, -1, 1, -1, 1, 1, -1, -1, 1, 1, 1, 1, 1], dtype=np.int32)
-END_SYNC_PATTERN = np.array([-1, -1, -1, -1, -1, 1, 1, -1, -1, 1, -1, 1, -1, 1, 1, -1, 1, -1, -1, 1], dtype=np.int32)  # Extended pattern
+# Sync patterns (gold codes, ±1)
+HEADERS_SYNC_PATTERN = gold127(shift=0)
+DATA_SYNC_PATTERN    = gold127(shift=17)
+END_SYNC_PATTERN     = gold127(shift=53)
 
 # PRBS for spreading (if enabled)
 HEADERS_PRBS = generate_prbs(CHIP_LENGTH_FOR_HEADERS, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_HEADERS else None
@@ -189,7 +189,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
                 decoded_chunks.append(bytes(rsc.decode(bytearray(blk))[0]))
             except ReedSolomonError:
                 # replace with black/zero payload for this chunk
-                decoded_chunks.append(bytes([0]) * CHUNK_BYTES)
+                decoded_chunks.append(blk[:CHUNK_BYTES])
             i += N
         # last (possibly shorter) block
         if i < len(data_bytes):
@@ -198,7 +198,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
                 decoded_chunks.append(bytes(rsc.decode(bytearray(blk))[0]))
             except ReedSolomonError:
                 k_last = max(0, len(blk) - ECC_SYMBOLS)
-                decoded_chunks.append(bytes([0]) * k_last)
+                decoded_chunks.append(blk[:k_last])
         decoded_data = b"".join(decoded_chunks)
         print("rs decode (chunked) took " + str(time.time() - t_rs_data))
     else:
