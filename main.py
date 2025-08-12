@@ -13,7 +13,7 @@ from helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold1
 # Config
 FRAME_WIDTH = 720
 FRAME_HEIGHT = 480  # NTSC
-ECC_SYMBOLS = 32
+ECC_SYMBOLS = 50
 CHUNK_BYTES = 128
 CHIP_LENGTH_FOR_HEADERS = 3
 CHIP_LENGTH_FOR_DATA = 1
