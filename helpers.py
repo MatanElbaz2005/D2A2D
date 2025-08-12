@@ -104,3 +104,27 @@ def block_deinterleave(data: bytes, rows: int) -> bytes:
     padded = data + bytes(cols * rows - len(data))
     matrix = np.frombuffer(padded, dtype=np.uint8).reshape(cols, rows).T
     return bytes(matrix.flatten()[:len(data)])
+
+def _mseq_127_taps_7_3(seed=0x7F):
+    state = seed & 0x7F
+    out = np.empty(127, np.uint8)
+    for i in range(127):
+        out[i] = state & 1
+        fb = ((state >> 6) ^ (state >> 2)) & 1
+        state = ((state >> 1) | (fb << 6)) & 0x7F
+    return out
+
+def _mseq_127_taps_7_1(seed=0x7F):
+    state = seed & 0x7F
+    out = np.empty(127, np.uint8)
+    for i in range(127):
+        out[i] = state & 1
+        fb = ((state >> 6) ^ (state >> 0)) & 1
+        state = ((state >> 1) | (fb << 6)) & 0x7F
+    return out
+
+def gold127(shift=0):
+    m1 = _mseq_127_taps_7_3()
+    m2 = _mseq_127_taps_7_1()
+    g = np.bitwise_xor(m1, np.roll(m2, shift))
+    return (g.astype(np.int32) * 2 - 1)
