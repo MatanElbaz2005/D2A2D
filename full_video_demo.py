@@ -215,8 +215,13 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
 if __name__ == "__main__":
     cap = cv2.VideoCapture(PATH_TO_VIDEO)
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    cv2.namedWindow('Channel encoded frame', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('Channel encoded frame', FRAME_WIDTH, FRAME_HEIGHT)
+    cv2.moveWindow('Channel encoded frame', 20, 20)
+
     cv2.namedWindow('Recovered', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('Recovered', FRAME_WIDTH, FRAME_HEIGHT)
+    cv2.moveWindow('Recovered', 60 + FRAME_WIDTH, 20)
 
     frame_count = 0
     while cap.isOpened():
@@ -256,6 +261,7 @@ if __name__ == "__main__":
                     decoded_img = cv2.resize(decoded_img, (FRAME_WIDTH, FRAME_HEIGHT))
                 frame_to_show = decoded_img
 
+            cv2.imshow('Channel encoded frame', noisy)
             cv2.imshow('Recovered', frame_to_show)
             delay_ms = max(1, int(1000.0 / fps - (time.time() - frame_start) * 1000.0))
             if cv2.waitKey(delay_ms) & 0xFF == ord('q'):
