@@ -14,7 +14,7 @@ from helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold1
 FRAME_WIDTH = 720
 FRAME_HEIGHT = 480  # NTSC
 ECC_SYMBOLS = 50
-CHUNK_BYTES = 128
+CHUNK_BYTES = 150
 CHIP_LENGTH_FOR_HEADERS = 3
 CHIP_LENGTH_FOR_DATA = 1
 DATA_PRBS_POLY = [8, 2]
@@ -23,6 +23,7 @@ MEMORY = [6]
 G_MATRIX = [[0o133, 0o171]]
 TB_LENGTH = 15
 PATH_TO_VIDEO = r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
+GAUSS_NOISE = 60.0
 
 # PRBS flags
 USE_PRBS_FOR_HEADERS = True
@@ -241,10 +242,8 @@ if __name__ == "__main__":
             # print(f"Encoded frame {frame_count} saved.")
 
             # add noise
-            p = 0.01
-            noisy = frame.copy()
-            flip_mask = (np.random.rand(*noisy.shape) < p)
-            noisy[flip_mask] ^= np.uint8(255)
+            noisy = frame.astype(np.float32) + np.random.normal(0.0, GAUSS_NOISE, frame.shape).astype(np.float32)
+            noisy = np.clip(noisy, 0, 255).astype(np.uint8)
 
             # decode
             decoded_data = decode_frame_to_udp(noisy)
