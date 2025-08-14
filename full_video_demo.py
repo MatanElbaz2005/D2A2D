@@ -22,8 +22,8 @@ FORMAT_IMAGE = 'jpg'
 MEMORY = [6]
 G_MATRIX = [[0o133, 0o171]]
 TB_LENGTH = 15
-PATH_TO_VIDEO = r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
-GAUSS_NOISE = 60.0
+PATH_TO_VIDEO = r"/home/matan/Documents/matan/D2A2D/1572378-sd_960_540_24fps.mp4"
+GAUSS_NOISE = 50.0
 
 # PRBS flags
 USE_PRBS_FOR_HEADERS = True
@@ -215,13 +215,18 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
 if __name__ == "__main__":
     cap = cv2.VideoCapture(PATH_TO_VIDEO)
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+
+    cv2.namedWindow('Original', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('Original', FRAME_WIDTH, FRAME_HEIGHT)
+    cv2.moveWindow('Original', 20, 20)
+
     cv2.namedWindow('Channel encoded frame', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('Channel encoded frame', FRAME_WIDTH, FRAME_HEIGHT)
-    cv2.moveWindow('Channel encoded frame', 20, 20)
+    cv2.moveWindow('Channel encoded frame', 40 + FRAME_WIDTH, 20)
 
     cv2.namedWindow('Recovered', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('Recovered', FRAME_WIDTH, FRAME_HEIGHT)
-    cv2.moveWindow('Recovered', 60 + FRAME_WIDTH, 20)
+    cv2.moveWindow('Recovered', 20, 40 + FRAME_HEIGHT) 
 
     frame_count = 0
     while cap.isOpened():
@@ -261,6 +266,7 @@ if __name__ == "__main__":
                     decoded_img = cv2.resize(decoded_img, (FRAME_WIDTH, FRAME_HEIGHT))
                 frame_to_show = decoded_img
 
+            cv2.imshow('Original', frame_proc)
             cv2.imshow('Channel encoded frame', noisy)
             cv2.imshow('Recovered', frame_to_show)
             delay_ms = max(1, int(1000.0 / fps - (time.time() - frame_start) * 1000.0))

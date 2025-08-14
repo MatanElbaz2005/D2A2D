@@ -22,7 +22,7 @@ FORMAT_IMAGE = 'jpg'
 MEMORY = [6]
 G_MATRIX = [[0o133, 0o171]]
 TB_LENGTH = 15
-PATH_TO_VIDEO = r"/home/pi/Documents/matan/code/D2A2D/1572378-sd_960_540_24fps.mp4"
+PATH_TO_VIDEO = r"/home/matan/Documents/matan/D2A2D/1572378-sd_960_540_24fps.mp4"
 
 # PRBS flags
 USE_PRBS_FOR_HEADERS = True
