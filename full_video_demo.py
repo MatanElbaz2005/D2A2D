@@ -9,6 +9,7 @@ import cv2
 import time
 from protected_jpeg import jpg_parse, jpg_build, fix_false_markers
 from helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127
+from gui_helpers import _to_bgr, _compose_grid, _label
 
 # Config
 FRAME_WIDTH = 720
@@ -216,17 +217,8 @@ if __name__ == "__main__":
     cap = cv2.VideoCapture(PATH_TO_VIDEO)
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
-    cv2.namedWindow('Original', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('Original', FRAME_WIDTH, FRAME_HEIGHT)
-    cv2.moveWindow('Original', 20, 20)
-
-    cv2.namedWindow('Channel encoded frame', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('Channel encoded frame', FRAME_WIDTH, FRAME_HEIGHT)
-    cv2.moveWindow('Channel encoded frame', 40 + FRAME_WIDTH, 20)
-
-    cv2.namedWindow('Recovered', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('Recovered', FRAME_WIDTH, FRAME_HEIGHT)
-    cv2.moveWindow('Recovered', 20, 40 + FRAME_HEIGHT) 
+    cv2.namedWindow('Monitor', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('Monitor', 2*FRAME_WIDTH + 20, 2*FRAME_HEIGHT + 20)
 
     frame_count = 0
     while cap.isOpened():
@@ -271,10 +263,13 @@ if __name__ == "__main__":
                     decoded_img = cv2.resize(decoded_img, (FRAME_WIDTH, FRAME_HEIGHT))
                 frame_to_show = decoded_img
 
-            cv2.imshow('Original', frame_proc)
-            cv2.imshow('Analog channel', analog_noisy)
-            cv2.imshow('Channel encoded frame', noisy)
-            cv2.imshow('Recovered', frame_to_show)
+            orig_vis = _label(_to_bgr(frame_proc), 'Original')
+            analog_vis = _label(_to_bgr(analog_noisy), 'Analog')
+            enc_vis = _label(_to_bgr(noisy), 'Encoded+Noise')
+            rec_vis = _label(_to_bgr(frame_to_show), 'Recovered')
+
+            mosaic = _compose_grid(orig_vis, analog_vis, enc_vis, rec_vis, gap=20)
+            cv2.imshow('Monitor', mosaic)
             delay_ms = max(1, int(1000.0 / fps - (time.time() - frame_start) * 1000.0))
             if cv2.waitKey(delay_ms) & 0xFF == ord('q'):
                 break
