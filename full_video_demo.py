@@ -220,6 +220,10 @@ if __name__ == "__main__":
     cv2.namedWindow('Monitor', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('Monitor', 2*FRAME_WIDTH + 20, 2*FRAME_HEIGHT + 20)
 
+    # UI: noise slider (σ in [0..100])
+    cv2.createTrackbar('Noise', 'Monitor', int(GAUSS_NOISE), 100, lambda v: None)
+    cv2.setTrackbarPos('Noise', 'Monitor', int(GAUSS_NOISE))
+
     frame_count = 0
     while cap.isOpened():
         frame_count += 1
@@ -243,13 +247,16 @@ if __name__ == "__main__":
             # cv2.imwrite(f"encoded_{frame_count}.png", frame)
             # print(f"Encoded frame {frame_count} saved.")
 
+            # read from slider
+            sigma = float(cv2.getTrackbarPos('Noise', 'Monitor'))
+            
             # add noise
-            noisy = frame.astype(np.float32) + np.random.normal(0.0, GAUSS_NOISE, frame.shape).astype(np.float32)
+            noisy = frame.astype(np.float32) + np.random.normal(0.0, sigma, frame.shape).astype(np.float32)
             noisy = np.clip(noisy, 0, 255).astype(np.uint8)
 
             # analog video (for the GUI)
             analog_src = frame_proc
-            analog_noisy = analog_src.astype(np.float32) + np.random.normal(0.0, GAUSS_NOISE, analog_src.shape).astype(np.float32)
+            analog_noisy = analog_src.astype(np.float32) + np.random.normal(0.0, sigma, analog_src.shape).astype(np.float32)
             analog_noisy = np.clip(analog_noisy, 0, 255).astype(np.uint8)
 
             # decode
