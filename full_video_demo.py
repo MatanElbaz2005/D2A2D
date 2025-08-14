@@ -239,26 +239,26 @@ if __name__ == "__main__":
         _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
         headers, compressed = jpg_parse(encoded_image.tobytes())
         
+        # encode
+        frame  = encode_udp_to_frame(headers, compressed)
+        
+        # save the encoded frame
+        # cv2.imwrite(f"encoded_{frame_count}.png", frame)
+        # print(f"Encoded frame {frame_count} saved.")
+
+        # read from slider
+        sigma = float(cv2.getTrackbarPos('Noise', 'Monitor'))
+        
+        # add noise
+        noisy = frame.astype(np.float32) + np.random.normal(0.0, sigma, frame.shape).astype(np.float32)
+        noisy = np.clip(noisy, 0, 255).astype(np.uint8)
+
+        # analog video (for the GUI)
+        analog_src = frame_proc
+        analog_noisy = analog_src.astype(np.float32) + np.random.normal(0.0, sigma, analog_src.shape).astype(np.float32)
+        analog_noisy = np.clip(analog_noisy, 0, 255).astype(np.uint8)
+
         try:
-            # encode
-            frame  = encode_udp_to_frame(headers, compressed)
-            
-            # save the encoded frame
-            # cv2.imwrite(f"encoded_{frame_count}.png", frame)
-            # print(f"Encoded frame {frame_count} saved.")
-
-            # read from slider
-            sigma = float(cv2.getTrackbarPos('Noise', 'Monitor'))
-            
-            # add noise
-            noisy = frame.astype(np.float32) + np.random.normal(0.0, sigma, frame.shape).astype(np.float32)
-            noisy = np.clip(noisy, 0, 255).astype(np.uint8)
-
-            # analog video (for the GUI)
-            analog_src = frame_proc
-            analog_noisy = analog_src.astype(np.float32) + np.random.normal(0.0, sigma, analog_src.shape).astype(np.float32)
-            analog_noisy = np.clip(analog_noisy, 0, 255).astype(np.uint8)
-
             # decode
             decoded_data = decode_frame_to_udp(noisy)
             decoded_np = np.frombuffer(decoded_data, dtype=np.uint8)
@@ -270,23 +270,22 @@ if __name__ == "__main__":
                     decoded_img = cv2.resize(decoded_img, (FRAME_WIDTH, FRAME_HEIGHT))
                 frame_to_show = decoded_img
 
-            orig_vis = _label(_to_bgr(frame_proc), 'Original')
-            analog_vis = _label(_to_bgr(analog_noisy), 'Analog')
-            enc_vis = _label(_to_bgr(noisy), 'Encoded+Noise')
-            rec_vis = _label(_to_bgr(frame_to_show), 'Recovered')
-
-            mosaic = _compose_grid(orig_vis, analog_vis, enc_vis, rec_vis, gap=20)
-            cv2.imshow('Monitor', mosaic)
-            delay_ms = max(1, int(1000.0 / fps - (time.time() - frame_start) * 1000.0))
-            if cv2.waitKey(delay_ms) & 0xFF == ord('q'):
-                break
-
 
         except ValueError as e:
             print(f"Error: {e}")
-            cv2.imshow('Recovered', np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8))
-            if cv2.waitKey(int(1000.0 / fps)) & 0xFF == ord('q'):
-                break
+            # show black recovered frame inside the single-Window mosaic
+            frame_to_show = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
+
+        orig_vis = _label(_to_bgr(frame_proc), 'Original')
+        analog_vis = _label(_to_bgr(analog_noisy), 'Analog')
+        enc_vis   = _label(_to_bgr(noisy), 'Encoded+Noise')
+        rec_vis   = _label(_to_bgr(frame_to_show), 'Recovered')
+
+        mosaic = _compose_grid(orig_vis, analog_vis, enc_vis, rec_vis, gap=20)
+        cv2.imshow('Monitor', mosaic)
+        delay_ms = max(1, int(1000.0 / fps - (time.time() - frame_start) * 1000.0))
+        if cv2.waitKey(delay_ms) & 0xFF == ord('q'):
+            break
 
     cap.release()
     cv2.destroyAllWindows()
