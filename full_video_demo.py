@@ -255,6 +255,11 @@ if __name__ == "__main__":
             noisy = frame.astype(np.float32) + np.random.normal(0.0, GAUSS_NOISE, frame.shape).astype(np.float32)
             noisy = np.clip(noisy, 0, 255).astype(np.uint8)
 
+            # analog video (for the GUI)
+            analog_src = frame_proc
+            analog_noisy = analog_src.astype(np.float32) + np.random.normal(0.0, GAUSS_NOISE, analog_src.shape).astype(np.float32)
+            analog_noisy = np.clip(analog_noisy, 0, 255).astype(np.uint8)
+
             # decode
             decoded_data = decode_frame_to_udp(noisy)
             decoded_np = np.frombuffer(decoded_data, dtype=np.uint8)
@@ -267,6 +272,7 @@ if __name__ == "__main__":
                 frame_to_show = decoded_img
 
             cv2.imshow('Original', frame_proc)
+            cv2.imshow('Analog channel', analog_noisy)
             cv2.imshow('Channel encoded frame', noisy)
             cv2.imshow('Recovered', frame_to_show)
             delay_ms = max(1, int(1000.0 / fps - (time.time() - frame_start) * 1000.0))
