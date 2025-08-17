@@ -1,111 +1,79 @@
-import numpy as np
-from reedsolo import RSCodec, ReedSolomonError
-from scipy import signal
-import cv2
-import time
-from helpers import generate_prbs
+import struct
+from typing import Tuple
 
-# Config
-FRAME_WIDTH = 720
-FRAME_HEIGHT = 480  # NTSC
-PATH_TO_VIDEO = r"./1572378-sd_960_540_24fps.mp4"
-
-# Sync patterns (Barker codes, ±1)
-HEADERS_SYNC_PATTERN = np.array([1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, -1, 1], dtype=np.int32)
-DATA_SYNC_PATTERN = np.array([1, -1, 1, -1, 1, 1, -1, -1, 1, 1, 1, 1, 1], dtype=np.int32)
-END_SYNC_PATTERN = np.array([-1, -1, -1, -1, -1, 1, 1, -1, -1, 1, -1, 1, -1, 1, 1, -1, 1, -1, -1, 1], dtype=np.int32)  # Extended pattern
-
-def jpg_parse(jpg_bytes: bytes) -> tuple[bytes, bytes]:
+def split_jpeg(data: bytes) -> Tuple[bytes, bytes]:
     """
-    Parses a JPEG binary stream and extracts the header data (everything up to and including the SOS header)
-    and the compressed pixel data (entropy-coded DCT coefficients after SOS header up to but not including EOI).
-    
-    Args:
-        jpg_bytes (bytes): The binary data of the JPEG file.
-    
-    Returns:
-        tuple[bytes, bytes]: (header_data, compressed_data)
-    
-    Raises:
-        ValueError: If the file is not a valid JPEG or is malformed.
+    Split a JPEG byte array into header (critical/small segments up to SOS) and data (bulk compressed content).
+    Returns: (header_bytes, data_bytes)
     """
-    if not jpg_bytes.startswith(b'\xff\xd8'):
-        raise ValueError("Not a valid JPEG file")
-    
-    header = bytearray(b'\xff\xd8')
-    i = 2
-    jpg_length = len(jpg_bytes)
-    
-    while i < jpg_length:
-        if jpg_bytes[i] != 0xff:
-            raise ValueError(f"Expected marker at position {i}")
-        
-        marker = jpg_bytes[i + 1]
-        header.extend(jpg_bytes[i:i+2])
-        i += 2
-        
-        if marker == 0xd9:  # EOI
-            raise ValueError("EOI encountered before SOS")
-        
-        if marker == 0xda:  # SOS
-            if i + 2 > jpg_length:
-                raise ValueError("Truncated length for SOS")
-            length = int.from_bytes(jpg_bytes[i:i+2], 'big')
-            if length < 2:
-                raise ValueError("Invalid length for SOS")
-            if i + length > jpg_length:
-                raise ValueError("Truncated SOS header")
-            header.extend(jpg_bytes[i:i + length])
-            i += length
-            break
-        
-        elif marker in range(0xd0, 0xd8) or marker == 0x01:
-            continue
-        
-        else:
-            if i + 2 > jpg_length:
-                raise ValueError("Truncated length")
-            length = int.from_bytes(jpg_bytes[i:i+2], 'big')
-            if length < 2:
-                raise ValueError("Invalid length")
-            if i + length > jpg_length:
-                raise ValueError("Truncated segment")
-            header.extend(jpg_bytes[i:i + length])
-            i += length
-    
-    # Extract compressed data up to EOI, handling byte stuffing and restart markers
-    compressed = bytearray()
-    while i < jpg_length - 1:
-        if jpg_bytes[i] == 0xff:
-            next_byte = jpg_bytes[i + 1]
-            if next_byte == 0xd9:  # EOI
-                break
-            compressed.extend(jpg_bytes[i:i+2])  # Include FF 00 or FF D0-D7
+    header = bytearray()
+    i = 0
+    data_len = len(data)
+
+    while i < data_len - 1:
+        if data[i] == 0xFF:
+            marker = (data[i] << 8) | data[i + 1]
+            header.extend(data[i:i + 2])
             i += 2
-        else:
-            compressed.append(jpg_bytes[i])
-            i += 1
-    
-    if i >= jpg_length:
-        raise ValueError("No EOI found")
-    
-    if i + 2 < jpg_length:
-        print("Warning: There is data after EOI")
-    
-    return bytes(header), bytes(compressed)
 
-def jpg_build(header: bytes, compressed: bytes) -> bytes:
+            # Standalone markers (e.g., SOI)
+            if marker in (0xFFD8, 0xFFD9):
+                continue  # EOI shouldn't be here, but handled later
+
+            if marker >= 0xFFD0 and marker <= 0xFFD7:  # RST in header (rare)
+                continue
+
+            if i + 2 > data_len:
+                raise ValueError("Incomplete JPEG segment")
+
+            length = struct.unpack(">H", data[i:i + 2])[0]
+            header.extend(data[i:i + 2])
+            i += 2
+
+            if i + length - 2 > data_len:
+                raise ValueError("Incomplete JPEG segment data")
+
+            segment_data = data[i:i + length - 2]
+            header.extend(segment_data)
+            i += length - 2
+
+            if marker == 0xFFDA:  # SOS found, now extract compressed data
+                compressed_start = i
+                # Scan for EOI, skipping escaped 0xFF00 and ignoring RST markers
+                while i < data_len - 1:
+                    if data[i] == 0xFF:
+                        next_byte = data[i + 1]
+                        if next_byte == 0x00:
+                            i += 2
+                            continue
+                        elif next_byte == 0xD9:  # EOI
+                            compressed_end = i
+                            break
+                        elif 0xD0 <= next_byte <= 0xD7:  # RST
+                            i += 2
+                            continue
+                        else:
+                            # Unexpected marker; assume continue for robustness
+                            i += 2
+                            continue
+                    else:
+                        i += 1
+                else:
+                    raise ValueError("No EOI found in JPEG")
+
+                data_bytes = data[compressed_start:compressed_end]
+                return bytes(header), data_bytes
+
+        else:
+            raise ValueError("Invalid JPEG: Non-marker byte in header")
+
+    raise ValueError("No SOS segment found in JPEG")
+
+def merge_jpeg(header: bytes, data: bytes) -> bytes:
     """
-    Builds a valid JPEG binary stream from the header data and compressed pixel data.
-    
-    Args:
-        header (bytes): The header data (up to and including SOS header).
-        compressed (bytes): The compressed pixel data (entropy-coded DCT coefficients).
-    
-    Returns:
-        bytes: The complete JPEG binary stream.
+    Merge the header and data back into a complete JPEG byte array by appending EOI.
     """
-    return header + compressed + b'\xff\xd9'
+    return header + data + b'\xff\xd9'
 
 
 def fix_false_markers(compressed: bytes) -> bytes:

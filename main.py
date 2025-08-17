@@ -7,7 +7,7 @@ except ImportError:
 from scipy import signal
 import cv2
 import time
-from protected_jpeg import jpg_parse, jpg_build, fix_false_markers
+from protected_jpeg import split_jpeg, merge_jpeg, fix_false_markers
 from helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127
 
 # Config
@@ -207,7 +207,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.8) -> bytes
     fixed_data = fix_false_markers(decoded_data)
     t7 = time.time()
     
-    result = jpg_build(decoded_headers, fixed_data)
+    result = merge_jpeg(decoded_headers, fixed_data)
     print(f"Total decode time: {time.time() - t0} sec")
     return result
 
@@ -225,7 +225,7 @@ if __name__ == "__main__":
         frame_proc = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
         encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 70, cv2.IMWRITE_JPEG_RST_INTERVAL, 1]
         _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
-        headers, compressed = jpg_parse(encoded_image.tobytes())
+        headers, compressed = split_jpeg(encoded_image.tobytes())
         
         try:
             # encode
