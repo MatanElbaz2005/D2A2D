@@ -9,6 +9,7 @@ import cv2
 import time
 from protected_jpeg import split_jpeg, merge_jpeg, fix_false_markers
 from helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127
+from helpers import _build_marker_codewords_gold, _is_marker_token_at, _encode_data_with_codewords, _decode_data_with_codewords
 from gui_helpers import _to_bgr, _compose_grid, _label
 
 # Config
@@ -25,6 +26,26 @@ G_MATRIX = [[0o133, 0o171]]
 TB_LENGTH = 15
 PATH_TO_VIDEO = r"/home/matan/Documents/matan/D2A2D/1572378-sd_960_540_24fps.mp4"
 GAUSS_NOISE = 50.0
+
+USE_MARKER_CODEWORDS = True
+MARKER_CODEWORD_LEN = 64
+MARKER_DET_THRESH   = 0.80
+
+if USE_MARKER_CODEWORDS:
+    MARKER_TOKENS = [bytes([0xFF, 0xD0 + i]) for i in range(8)] + [b"\xFF\x00"]
+    _TOKENS, _CODES = _build_marker_codewords_gold(MARKER_CODEWORD_LEN, MARKER_TOKENS)
+    means = _CODES.mean(axis=1)
+    print("[codewords] mean per token (≈0):", [float(f"{m:.3f}") for m in means])
+
+    norm = (_CODES @ _CODES.T) / _CODES.shape[1]
+    for i in range(norm.shape[0]):
+        norm[i, i] = 0.0
+    print("[codewords] max cross-corr (≈0):", float(f"{norm.max():.3f}"))
+
+    print(f"[codewords] L={MARKER_CODEWORD_LEN} (token -> codeword 01)")
+    for tok, cw in zip(_TOKENS, _CODES):
+        s01 = ''.join('1' if int(v) > 0 else '0' for v in cw.tolist())
+        print(f"  FF{tok[1]:02X}: {s01}")
 
 # PRBS flags
 USE_PRBS_FOR_HEADERS = True
@@ -80,15 +101,36 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
         coded_data = data
 
     
-    data_bits = np.unpackbits(np.frombuffer(coded_data, dtype=np.uint8))
-    data_bits_pm = data_bits.astype(np.int8) * 2 - 1
-    
-    if USE_PRBS_FOR_DATA:
-        repeated_data_bits = np.repeat(data_bits_pm, CHIP_LENGTH_FOR_DATA)
-        tiled_prbs = np.tile(DATA_PRBS, len(data_bits))
-        protected_data = repeated_data_bits * tiled_prbs
+    if USE_MARKER_CODEWORDS:
+        counts = {tok: 0 for tok in _TOKENS}
+        i = 0
+        n = len(coded_data)
+        while i + 1 < n:
+            if coded_data[i] == 0xFF and (coded_data[i+1] == 0x00 or 0xD0 <= coded_data[i+1] <= 0xD7):
+                tok = coded_data[i:i+2]
+                if tok in counts:
+                    counts[tok] += 1
+                i += 2
+            else:
+                i += 1
+
+        print("[marker usage per frame (before noise)]")
+        total = 0
+        for tok in _TOKENS:
+            c = counts[tok]
+            total += c
+            print(f"  FF{tok[1]:02X}: {c}")
+        print(f"  TOTAL: {total}")
+        protected_data = _encode_data_with_codewords(coded_data, _TOKENS, _CODES)
     else:
-        protected_data = data_bits_pm
+        data_bits = np.unpackbits(np.frombuffer(coded_data, dtype=np.uint8))
+        data_bits_pm = data_bits.astype(np.int8) * 2 - 1
+        if USE_PRBS_FOR_DATA:
+            repeated_data_bits = np.repeat(data_bits_pm, CHIP_LENGTH_FOR_DATA)
+            tiled_prbs = np.tile(DATA_PRBS, len(data_bits))
+            protected_data = repeated_data_bits * tiled_prbs
+        else:
+            protected_data = data_bits_pm
 
     full_stream = np.concatenate((HEADERS_SYNC_PATTERN, protected_headers, DATA_SYNC_PATTERN, protected_data, END_SYNC_PATTERN))
     print(f"[encode] Full stream length: {len(full_stream)} bits")
@@ -170,15 +212,18 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     
     # Despread data
     protected_data = received_pm[data_start:data_end]
-    if USE_PRBS_FOR_DATA:
-        n_groups_data = len(protected_data) // CHIP_LENGTH_FOR_DATA
-        chips_data = protected_data[:n_groups_data * CHIP_LENGTH_FOR_DATA].reshape(-1, CHIP_LENGTH_FOR_DATA)
-        rx_bits_pm_data = np.dot(chips_data, DATA_PRBS) / CHIP_LENGTH_FOR_DATA
-        rx_bits_data = ((np.sign(rx_bits_pm_data) + 1) / 2).astype(np.uint8)
+    if USE_MARKER_CODEWORDS:
+        data_bytes = _decode_data_with_codewords(protected_data.astype(np.int8), _TOKENS, _CODES, MARKER_DET_THRESH)
     else:
-        rx_bits_data = ((protected_data + 1) / 2).astype(np.uint8)
-    
-    data_bytes = np.packbits(rx_bits_data).tobytes()
+        if USE_PRBS_FOR_DATA:
+            n_groups_data = len(protected_data) // CHIP_LENGTH_FOR_DATA
+            chips_data = protected_data[:n_groups_data * CHIP_LENGTH_FOR_DATA].reshape(-1, CHIP_LENGTH_FOR_DATA)
+            rx_bits_pm_data = np.dot(chips_data, DATA_PRBS) / CHIP_LENGTH_FOR_DATA
+            rx_bits_data = ((np.sign(rx_bits_pm_data) + 1) / 2).astype(np.uint8)
+        else:
+            rx_bits_data = ((protected_data + 1) / 2).astype(np.uint8)
+        data_bytes = np.packbits(rx_bits_data).tobytes()
+
     
     if USE_RS_FOR_DATA:
         t_rs_data = time.time()
@@ -235,7 +280,7 @@ if __name__ == "__main__":
         print(f"Original: {w}×{h}")
         
         frame_proc = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
-        encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 70, cv2.IMWRITE_JPEG_RST_INTERVAL, 1]
+        encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 30, cv2.IMWRITE_JPEG_RST_INTERVAL, 1]
         _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
         headers, compressed = split_jpeg(encoded_image.tobytes())
         

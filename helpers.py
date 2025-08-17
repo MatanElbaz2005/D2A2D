@@ -128,3 +128,100 @@ def gold127(shift=0):
     m2 = _mseq_127_taps_7_1()
     g = np.bitwise_xor(m1, np.roll(m2, shift))
     return (g.astype(np.int32) * 2 - 1)
+
+
+def _is_marker_token_at(data: bytes, i: int) -> bool:
+    return (i + 1 < len(data)) and data[i] == 0xFF and (data[i+1] == 0x00 or 0xD0 <= data[i+1] <= 0xD7)
+
+def _best_balanced_segment_pm(seq_pm: np.ndarray, L: int) -> np.ndarray:
+    """Pick a length-L circular segment of a ±1 sequence with minimal |sum| (≈ mean 0)."""
+    s = seq_pm.astype(np.int8)
+    n = s.size
+    x = np.concatenate([s, s])  # allow wraparound
+    c = np.concatenate(([0], np.cumsum(x, dtype=np.int32)))
+    best = (10**9, 0)
+    for start in range(n):
+        end = start + L
+        seg_sum = int(c[end] - c[start])  # sum of ±1
+        score = abs(seg_sum)
+        if score < best[0]:
+            best = (score, start)
+            if score == 0:
+                break
+    start = best[1]
+    return x[start:start+L].astype(np.int8)
+
+def _build_marker_codewords_gold(L: int, MARKER_TOKENS) -> tuple[list[bytes], np.ndarray]:
+    """
+    Build ±1 codewords from Gold(127) with different shifts, then pick a balanced length-L window.
+    """
+    shifts = [0, 9, 17, 29, 37, 45, 53, 61, 73]  # well-separated
+    codes = []
+    for sh in shifts:
+        g = gold127(shift=sh).astype(np.int8)  # ±1 length 127
+        cw = _best_balanced_segment_pm(g, L)   # choose balanced window of length L
+        codes.append(cw)
+    C = np.stack(codes, axis=0).astype(np.int8)
+    return MARKER_TOKENS, C
+
+
+
+def _encode_data_with_codewords(data: bytes, tokens: list[bytes], codes: np.ndarray) -> np.ndarray:
+    """
+    For each marker token -> emit its codeword (L chips).
+    For any other byte -> emit 8 chips (±1 per bit).
+    """
+    tok2row = {tok: i for i, tok in enumerate(tokens)}
+    out = []
+    i = 0
+    n = len(data)
+    while i < n:
+        if _is_marker_token_at(data, i):
+            tok = data[i:i+2]
+            row = tok2row.get(tok, None)
+            if row is not None:
+                out.append(codes[row])  # L chips
+                i += 2
+                continue
+            # fallback if somehow unknown (shouldn't happen)
+        # normal byte
+        b = data[i]
+        bits = np.unpackbits(np.frombuffer(bytes([b]), np.uint8)).astype(np.int8)*2-1
+        out.append(bits)  # 8 chips
+        i += 1
+    return np.concatenate(out).astype(np.int8)
+
+def _decode_data_with_codewords(chips_pm: np.ndarray, tokens: list[bytes], codes: np.ndarray, thresh: float) -> bytes:
+    """
+    Greedy sliding-window parser:
+      - If corr(window_L, any_codeword) >= thresh -> emit its token, advance L.
+      - Else -> read next 8 chips as a normal byte, advance 8.
+    """
+    L = codes.shape[1]
+    out = bytearray()
+    pos = 0
+    N = chips_pm.size
+
+    def _decode_normal_byte_at(p: int) -> tuple[int, int]:
+        byte_chips = chips_pm[p:p+8]
+        bits = (byte_chips > 0).astype(np.uint8)
+        return int(np.packbits(bits)[0]), p + 8
+
+    while pos < N:
+        # try marker match
+        if pos + L <= N:
+            win = chips_pm[pos:pos+L].astype(np.int32)
+            # correlation per codeword (normalized)
+            scores = (codes @ win) / L
+            j = int(np.argmax(scores))
+            if float(scores[j]) >= thresh:
+                out.extend(tokens[j])
+                pos += L
+                continue
+        # normal byte
+        if pos + 8 > N:
+            break
+        b, pos = _decode_normal_byte_at(pos)
+        out.append(b)
+
+    return bytes(out)
