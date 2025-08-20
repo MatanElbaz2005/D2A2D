@@ -68,7 +68,7 @@ END_SYNC_PATTERN     = gold127(shift=53)
 HEADERS_PRBS = generate_prbs(CHIP_LENGTH_FOR_HEADERS, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_HEADERS else None
 DATA_PRBS = generate_prbs(CHIP_LENGTH_FOR_DATA, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_DATA else None
 
-def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
+def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
     start_time = time.time()
     
     if USE_RS_FOR_HEADERS:
@@ -133,6 +133,24 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
             protected_data = data_bits_pm
 
     full_stream = np.concatenate((HEADERS_SYNC_PATTERN, protected_headers, DATA_SYNC_PATTERN, protected_data, END_SYNC_PATTERN))
+
+    s0 = 0
+    s1 = s0 + len(HEADERS_SYNC_PATTERN)
+    s2 = s1 + len(protected_headers)
+    s3 = s2 + len(DATA_SYNC_PATTERN)
+    s4 = s3 + len(protected_data)
+    s5 = s4 + len(END_SYNC_PATTERN)
+
+    tx_meta = {
+        "stream_pm": full_stream.astype(np.int8),
+        "idx": {
+            "sync_h": (s0, s1),
+            "hdr":    (s1, s2),
+            "sync_d": (s2, s3),
+            "data":   (s3, s4),
+            "sync_e": (s4, s5),
+        }
+    }
     print(f"[encode] Full stream length: {len(full_stream)} bits")
     
     total_pixels = FRAME_WIDTH * FRAME_HEIGHT
@@ -146,7 +164,7 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:
     
     print(f"[encode] Frame shape: {frame.shape}")
     print(f"Encode took: {time.time() - start_time} sec")
-    return frame
+    return frame, tx_meta
 
 def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes:
     t0 = time.time()
@@ -285,7 +303,7 @@ if __name__ == "__main__":
         headers, compressed = split_jpeg(encoded_image.tobytes())
         
         # encode
-        frame  = encode_udp_to_frame(headers, compressed)
+        frame, tx_meta = encode_udp_to_frame(headers, compressed)
         
         # save the encoded frame
         # cv2.imwrite(f"encoded_{frame_count}.png", frame)
@@ -303,23 +321,74 @@ if __name__ == "__main__":
         analog_noisy = analog_src.astype(np.float32) + np.random.normal(0.0, sigma, analog_src.shape).astype(np.float32)
         analog_noisy = np.clip(analog_noisy, 0, 255).astype(np.uint8)
 
+        # --- Pre-compute chip-level BER per section (independent of decode success) ---
+        rx_pm = (2 * (noisy.ravel() > 127).astype(np.int8) - 1)
+        tx_pm = tx_meta["stream_pm"]; idx = tx_meta["idx"]; L_end = idx["sync_e"][1]
+        rx_pm = rx_pm[:L_end]
+
+        s,e = idx["hdr"];    err_h  = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_h  = e - s; ber_h  = (err_h/tot_h) if tot_h else 0.0
+        s,e = idx["data"];   err_d  = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_d  = e - s; ber_d  = (err_d/tot_d) if tot_d else 0.0
+        s,e = idx["sync_h"]; err_sh = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_sh = e - s
+        s,e = idx["sync_d"]; err_sd = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_sd = e - s
+        s,e = idx["sync_e"]; err_se = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_se = e - s
+
+        err_sync = err_sh + err_sd + err_se
+        tot_sync = tot_sh + tot_sd + tot_se
+        ber_sync = (err_sync / tot_sync) if tot_sync else 0.0
+
+        err_total  = err_h + err_d + err_sync
+        bits_total = tot_h + tot_d + tot_sync
+        ber_total  = (err_total / bits_total) if bits_total else 0.0
+
+        line1 = f"BER stream: {100.0*ber_total:.2f}%  ({err_total}/{bits_total} chips)"
+        line2 = f"H: {100.0*ber_h:.2f}%  D: {100.0*ber_d:.2f}%  Sync: {100.0*ber_sync:.2f}%"
+
         try:
             # decode
             decoded_data = decode_frame_to_udp(noisy)
             decoded_np = np.frombuffer(decoded_data, dtype=np.uint8)
             decoded_img = cv2.imdecode(decoded_np, cv2.IMREAD_COLOR)
             if decoded_img is None:
+                # show black recovered frame
                 frame_to_show = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
+                annotated = frame_to_show.copy(); y0 = 22
+                x1 = FRAME_WIDTH - 10 - cv2.getTextSize(line1, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
+                cv2.putText(annotated, line1, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
+                cv2.putText(annotated, line1, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
+                y0 += 20
+                x2 = FRAME_WIDTH - 10 - cv2.getTextSize(line2, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
+                cv2.putText(annotated, line2, (x2, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
+                cv2.putText(annotated, line2, (x2, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
+                frame_to_show = annotated
+
             else:
                 if decoded_img.shape[1] != FRAME_WIDTH or decoded_img.shape[0] != FRAME_HEIGHT:
                     decoded_img = cv2.resize(decoded_img, (FRAME_WIDTH, FRAME_HEIGHT))
                 frame_to_show = decoded_img
 
+                annotated = frame_to_show.copy(); y0 = 22
+                x1 = FRAME_WIDTH - 10 - cv2.getTextSize(line1, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
+                cv2.putText(annotated, line1, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
+                cv2.putText(annotated, line1, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
+                y0 += 20
+                x2 = FRAME_WIDTH - 10 - cv2.getTextSize(line2, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
+                cv2.putText(annotated, line2, (x2, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
+                cv2.putText(annotated, line2, (x2, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
+                frame_to_show = annotated
 
         except ValueError as e:
             print(f"Error: {e}")
             # show black recovered frame inside the single-Window mosaic
             frame_to_show = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
+            annotated = frame_to_show.copy(); y0 = 22
+            x1 = FRAME_WIDTH - 10 - cv2.getTextSize(line1, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
+            cv2.putText(annotated, line1, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
+            cv2.putText(annotated, line1, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
+            y0 += 20
+            x2 = FRAME_WIDTH - 10 - cv2.getTextSize(line2, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
+            cv2.putText(annotated, line2, (x2, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
+            cv2.putText(annotated, line2, (x2, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
+            frame_to_show = annotated
 
         orig_vis = _label(_to_bgr(frame_proc), 'Original')
         analog_vis = _label(_to_bgr(analog_noisy), 'Analog')
