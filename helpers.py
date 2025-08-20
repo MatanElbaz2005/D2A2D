@@ -1,5 +1,7 @@
 import numpy as np
 
+_PM_LUT8 = (np.unpackbits(np.arange(256, dtype=np.uint8).reshape(-1,1), axis=1).astype(np.int8)*2 - 1)  # shape (256,8)
+
 def conv_encode_bits(bits: np.ndarray, g1: int = 0o133, g2: int = 0o171) -> np.ndarray:
     k = 7
     state = 0
@@ -223,5 +225,112 @@ def _decode_data_with_codewords(chips_pm: np.ndarray, tokens: list[bytes], codes
             break
         b, pos = _decode_normal_byte_at(pos)
         out.append(b)
+
+    return bytes(out)
+
+def _encode_data_with_codewords_fast(data: bytes, tokens: list[bytes], codes: np.ndarray) -> np.ndarray:
+    arr = np.frombuffer(data, dtype=np.uint8)
+    n = arr.size
+    if n == 0:
+        return np.empty(0, dtype=np.int8)
+
+    allowed = np.array([0x00] + list(range(0xD0, 0xD8)), dtype=np.uint8)
+    starts_mask = (arr[:-1] == 0xFF) & np.isin(arr[1:], allowed)
+    starts = np.flatnonzero(starts_mask)
+
+    second_to_row = np.full(256, -1, dtype=np.int16)
+    for i, tok in enumerate(tokens):
+        second_to_row[tok[1]] = i
+
+    L = int(codes.shape[1])
+    m = int(starts.size)
+    out_len = 8*(n - 2*m) + L*m
+    out = np.empty(out_len, dtype=np.int8)
+
+    w = 0
+    cursor = 0
+    for s in starts:
+        seg_len = s - cursor
+        if seg_len > 0:
+            blk = _PM_LUT8[arr[cursor:s]].reshape(-1)
+            out[w:w+8*seg_len] = blk
+            w += 8*seg_len
+        row = int(second_to_row[arr[s+1]])
+        if row >= 0:
+            out[w:w+L] = codes[row]
+            w += L
+            cursor = s + 2
+        else:
+            blk = _PM_LUT8[arr[s:s+1]].reshape(-1)
+            out[w:w+8] = blk
+            w += 8
+            cursor = s + 1
+
+    if cursor < n:
+        seg_len = n - cursor
+        blk = _PM_LUT8[arr[cursor:]].reshape(-1)
+        out[w:w+8*seg_len] = blk
+        w += 8*seg_len
+
+    return out
+
+def _decode_data_with_codewords_fast(chips_pm: np.ndarray, tokens: list[bytes], codes: np.ndarray, thresh: float) -> bytes:
+    chips_pm = chips_pm.astype(np.int8, copy=False)
+    L = int(codes.shape[1])
+    N = int(chips_pm.size)
+    if N < 8:
+        return b""
+
+    step = 8
+    n_pos = (N - L) // step + 1 if N >= L else 0
+
+    if n_pos > 0:
+        strided = np.lib.stride_tricks.as_strided(
+            chips_pm,
+            shape=(n_pos, L),
+            strides=(chips_pm.strides[0]*step, chips_pm.strides[0])
+        )
+        scores = (strided.astype(np.int16) @ codes.T.astype(np.int16)) / L
+        best_idx = np.argmax(scores, axis=1)
+        best_val = scores[np.arange(n_pos), best_idx]
+        hits = best_val >= thresh
+    else:
+        hits = np.zeros(0, dtype=bool)
+        best_idx = np.zeros(0, dtype=np.intp)
+
+    out = bytearray()
+    pos = 0
+    pos8 = 0
+
+    while pos < N:
+        if pos8 < hits.size and hits[pos8]:
+            j = int(best_idx[pos8])
+            out.extend(tokens[j])
+            pos  += L
+            pos8 += L // 8
+        else:
+            if pos8 < hits.size:
+                rel = hits[pos8:]
+                next_rel = np.flatnonzero(rel)
+                next_hit = (pos8 + int(next_rel[0])) if next_rel.size else hits.size
+            else:
+                next_hit = pos8
+
+            run_pos8 = max(0, next_hit - pos8)
+            run_chips = chips_pm[pos:pos + 8*run_pos8]
+            if run_chips.size > 0:
+                bits = (run_chips > 0).astype(np.uint8).reshape(-1, 8)
+                out.extend(np.packbits(bits, axis=1).ravel().tolist())
+            pos  += 8*run_pos8
+            pos8 += run_pos8
+
+            if pos8 >= hits.size:
+                rem = N - pos
+                tail_bytes = rem // 8
+                if tail_bytes > 0:
+                    bits = (chips_pm[pos:pos + 8*tail_bytes] > 0).astype(np.uint8).reshape(-1, 8)
+                    out.extend(np.packbits(bits, axis=1).ravel().tolist())
+                    pos += 8*tail_bytes
+                break
 
     return bytes(out)
