@@ -12,24 +12,42 @@ from helpers.helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_
 from helpers.helpers import _build_marker_codewords_gold, _is_marker_token_at, _encode_data_with_codewords_fast, _decode_data_with_codewords_fast
 from helpers.gui_helpers import _to_bgr, _compose_grid, _label
 from helpers.runtime_helpers import _rt_init, _rt_set_frame, _rt_record, _rt_print, _rt_flush_if_ready
+from helpers.camera_helpers import open_capture
 
-# Config
+# Frame config
 FRAME_WIDTH = 720
 FRAME_HEIGHT = 480  # NTSC
+
+# Reed-Solomon config
+USE_RS_FOR_HEADERS = True
+USE_RS_FOR_DATA = True
 ECC_SYMBOLS = 50
 CHUNK_BYTES = 150
+
+# PRBS config
+USE_PRBS_FOR_HEADERS = True
+USE_PRBS_FOR_DATA = False
 CHIP_LENGTH_FOR_HEADERS = 3
 CHIP_LENGTH_FOR_DATA = 1
 DATA_PRBS_POLY = [8, 2]
-FORMAT_IMAGE = 'jpg'
-MEMORY = [6]
-G_MATRIX = [[0o133, 0o171]]
-TB_LENGTH = 15
+
+# Marker codewords config
+USE_MARKER_CODEWORDS = False
+MARKER_CODEWORD_LEN = 64
+MARKER_DET_THRESH   = 0.80
+
+# Camera config
+INPUT_SOURCE = "camera"       # "camera" or "file"
+CAMERA_INDEX = 0            # 0=default webcam
+TARGET_FPS   = 25.0         # desired camera FPS
 PATH_TO_VIDEO = r"C:\Users\matan\OneDrive\מסמכים\Matan\D2A2D\1572378-sd_960_540_24fps.mp4"
+
+# Noise config
 GAUSS_NOISE = 50.0
 
+# Runtime json config
 save_runtime = True
-OS = "windows"  # "windows" | "raspberry_pi"
+OS = "windows"  # "windows" or "raspberry_pi"
 
 _RUNTIME = {
     "enabled": False,
@@ -38,10 +56,6 @@ _RUNTIME = {
     "flushed": False,
     "filename": None
 }
-
-USE_MARKER_CODEWORDS = True
-MARKER_CODEWORD_LEN = 64
-MARKER_DET_THRESH   = 0.80
 
 if USE_MARKER_CODEWORDS:
     codewords_time = time.time()
@@ -58,14 +72,6 @@ if USE_MARKER_CODEWORDS:
     for tok, cw in zip(_TOKENS, _CODES):
         s01 = ''.join('1' if int(v) > 0 else '0' for v in cw.tolist())
     _rt_print(_RUNTIME, "[ENC] Build marker codewords took: ", time.time() - codewords_time)
-
-# PRBS flags
-USE_PRBS_FOR_HEADERS = True
-USE_PRBS_FOR_DATA = False
-
-# RS flags
-USE_RS_FOR_HEADERS = True
-USE_RS_FOR_DATA = True
 
 perp_rsc_time = time.time()
 rsc = RSCodec(ECC_SYMBOLS)
@@ -291,8 +297,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
 
 if __name__ == "__main__":
     _rt_init(save_runtime, _RUNTIME, OS)
-    cap = cv2.VideoCapture(PATH_TO_VIDEO)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    cap, fps = open_capture(INPUT_SOURCE, OS, PATH_TO_VIDEO, CAMERA_INDEX, FRAME_WIDTH, FRAME_HEIGHT, TARGET_FPS)
 
     cv2.namedWindow('Monitor', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('Monitor', 2*FRAME_WIDTH + 20, 2*FRAME_HEIGHT + 20)
