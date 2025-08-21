@@ -11,6 +11,7 @@ from protected_jpeg import split_jpeg, merge_jpeg, fix_false_markers
 from helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127, _decode_data_with_codewords_popcnt
 from helpers import _build_marker_codewords_gold, _is_marker_token_at, _encode_data_with_codewords_fast, _decode_data_with_codewords_fast
 from gui_helpers import _to_bgr, _compose_grid, _label
+from runtime_helpers import _rt_init, _rt_set_frame, _rt_record, _rt_print, _rt_flush_if_ready
 
 # Config
 FRAME_WIDTH = 720
@@ -24,8 +25,19 @@ FORMAT_IMAGE = 'jpg'
 MEMORY = [6]
 G_MATRIX = [[0o133, 0o171]]
 TB_LENGTH = 15
-PATH_TO_VIDEO = r"/home/matan/Documents/matan/D2A2D/1572378-sd_960_540_24fps.mp4"
+PATH_TO_VIDEO = r"C:\Users\matan\OneDrive\מסמכים\Matan\D2A2D\1572378-sd_960_540_24fps.mp4"
 GAUSS_NOISE = 50.0
+
+save_runtime = True
+OS = "windows"  # "windows" | "raspberry_pi"
+
+_RUNTIME = {
+    "enabled": False,
+    "frame": 0,
+    "collected": {},
+    "flushed": False,
+    "filename": None
+}
 
 USE_MARKER_CODEWORDS = True
 MARKER_CODEWORD_LEN = 64
@@ -45,7 +57,7 @@ if USE_MARKER_CODEWORDS:
     print(f"[codewords] L={MARKER_CODEWORD_LEN} (token -> codeword 01)")
     for tok, cw in zip(_TOKENS, _CODES):
         s01 = ''.join('1' if int(v) > 0 else '0' for v in cw.tolist())
-    print("[ENC] Build marker codewords took: " + str(time.time() - codewords_time))
+    _rt_print(_RUNTIME, "[ENC] Build marker codewords took: ", time.time() - codewords_time)
 
 # PRBS flags
 USE_PRBS_FOR_HEADERS = True
@@ -57,7 +69,7 @@ USE_RS_FOR_DATA = True
 
 perp_rsc_time = time.time()
 rsc = RSCodec(ECC_SYMBOLS)
-print("[ENC] preper RS took " + str(time.time() - perp_rsc_time))
+_rt_print(_RUNTIME, "[ENC] preper RS took ", time.time() - perp_rsc_time)
 
 # Sync patterns (gold codes, ±1)
 HEADERS_SYNC_PATTERN = gold127(shift=0)
@@ -67,10 +79,10 @@ END_SYNC_PATTERN     = gold127(shift=53)
 # PRBS for spreading (if enabled)
 prbs_headers_time = time.time()
 HEADERS_PRBS = generate_prbs(CHIP_LENGTH_FOR_HEADERS, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_HEADERS else None
-if USE_PRBS_FOR_HEADERS: print("[ENC] generate PRBS headers took: " + str(time.time() - prbs_headers_time))
+if USE_PRBS_FOR_HEADERS: _rt_print(_RUNTIME, "[ENC] generate PRBS headers took: ", time.time() - prbs_headers_time)
 prbs_data_time = time.time()
 DATA_PRBS = generate_prbs(CHIP_LENGTH_FOR_DATA, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_DATA else None
-if USE_PRBS_FOR_DATA: print("[ENC] generate PRBS data took: " + str(time.time() - prbs_data_time))
+if USE_PRBS_FOR_DATA: _rt_print(_RUNTIME, "[ENC] generate PRBS data took: ", time.time() - prbs_data_time)
 
 def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
     start_time = time.time()
@@ -78,7 +90,7 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
     if USE_RS_FOR_HEADERS:
         start_rs_headers_encode = time.time()
         coded_headers = rsc.encode(bytearray(headers))
-        print("[ENC] rs encode for headers took " + str(time.time() - start_rs_headers_encode))
+        _rt_print(_RUNTIME, "[ENC] rs encode for headers took ", time.time() - start_rs_headers_encode)
     else:
         coded_headers = headers
     
@@ -93,7 +105,7 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
     else:
         mapping = {0: np.array([-1, 1, -1]), 1: np.array([1, -1, 1])}
         protected_headers = np.concatenate([mapping[bit] for bit in header_bits])
-    print(f"[ENC] PRBS/map headers: {time.time()-t}s")
+    _rt_print(_RUNTIME, "[ENC] PRBS/map headers: ", time.time() - t, "s")
     
     if USE_RS_FOR_DATA:
         start_rs_data_encode = time.time()
@@ -102,7 +114,7 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
             blk = data[i:i+CHUNK_BYTES]
             coded_blocks.append(rsc.encode(bytearray(blk))) 
         coded_data = b"".join(coded_blocks)
-        print("[ENC] rs encode (chunked) took " + str(time.time() - start_rs_data_encode))
+        _rt_print(_RUNTIME, "[ENC] rs encode (chunked) took ", time.time() - start_rs_data_encode)
     else:
         coded_data = data
 
@@ -110,7 +122,7 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
     if USE_MARKER_CODEWORDS:
         t = time.time()
         protected_data = _encode_data_with_codewords_fast(coded_data, _TOKENS, _CODES)
-        print(f"[ENC] Marker codewords encode: {time.time()-t}s")
+        _rt_print(_RUNTIME, "[ENC] Marker codewords encode: ", time.time() - t, "s")
     else:
         t = time.time()
         data_bits = np.unpackbits(np.frombuffer(coded_data, dtype=np.uint8))
@@ -121,11 +133,11 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
             protected_data = repeated_data_bits * tiled_prbs
         else:
             protected_data = data_bits_pm
-        print(f"[ENC] PRBS/map data: {time.time()-t}s")
+        _rt_print(_RUNTIME, "[ENC] PRBS/map data: ", time.time() - t, "s")
 
     t = time.time()
     full_stream = np.concatenate((HEADERS_SYNC_PATTERN, protected_headers, DATA_SYNC_PATTERN, protected_data, END_SYNC_PATTERN))
-    print(f"[ENC] Concat full stream: {time.time()-t}s (len={len(full_stream)})")
+    _rt_print(_RUNTIME, "[ENC] Concat full stream: ", time.time()-t, "s len=", len(full_stream))
 
     s0 = 0
     s1 = s0 + len(HEADERS_SYNC_PATTERN)
@@ -144,8 +156,8 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
             "sync_e": (s4, s5),
         }
     }
-    print(f"[ENC] Full stream length: {len(full_stream)} bits")
-    
+    _rt_print(_RUNTIME, "[ENC] Full stream length: ", len(full_stream), " bits")
+
     total_pixels = FRAME_WIDTH * FRAME_HEIGHT
     if len(full_stream) > total_pixels:
         raise ValueError(f"Data too large: {len(full_stream)} bits > {total_pixels} pixels")
@@ -154,8 +166,8 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
     if full_u8.size < total_pixels:
         full_u8 = np.pad(full_u8, (0, total_pixels - full_u8.size), mode='constant')
     frame = full_u8.reshape((FRAME_HEIGHT, FRAME_WIDTH))
-    
-    print(f"[ENC] took: {time.time() - start_time} sec")
+
+    _rt_print(_RUNTIME, "[ENC] took: ", time.time() - start_time, " sec")
     return frame, tx_meta
 
 def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes:
@@ -164,13 +176,13 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     t0 = time.time()
     received_pm = (2 * (frame.ravel() > 127).astype(np.int8) - 1)
     t1 = time.time()
-    print("[DEC] Threshold->±1 took: " + str(t1-t0))
-    
+    _rt_print(_RUNTIME, "[DEC] Threshold->±1 took: ", t1 - t0)
+
     t = time.time()
     corr_headers = signal.correlate(received_pm, HEADERS_SYNC_PATTERN, mode='valid') / len(HEADERS_SYNC_PATTERN)
     corr_data    = signal.correlate(received_pm, DATA_SYNC_PATTERN,    mode='valid') / len(DATA_SYNC_PATTERN)
     corr_end     = signal.correlate(received_pm, END_SYNC_PATTERN,     mode='valid') / len(END_SYNC_PATTERN)
-    print(f"[DEC] 3×correlate: {time.time()-t}s")
+    _rt_print(_RUNTIME, "[DEC] 3×correlate: ", time.time()-t, "s")
     
     if np.max(corr_headers) < corr_threshold or np.max(corr_data) < corr_threshold or np.max(corr_end) < corr_threshold:
         raise ValueError(f"Sync not detected: headers={np.max(corr_headers)}, data={np.max(corr_data)}, end={np.max(corr_end)}")
@@ -199,19 +211,19 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
         patterns = np.array([[-1, 1, -1], [1, -1, 1]], dtype=np.int32)
         corr = np.dot(chips, patterns.T) / 3
         rx_bits_headers = (np.argmax(corr, axis=1)).astype(np.uint8)
-    print("[DEC] PRBS/map headers took: " + str(time.time() - t3))
-    
+    _rt_print(_RUNTIME, "[DEC] PRBS/map headers took: ", time.time() - t3)
+
     t4 = time.time()
     rx_bytes = np.packbits(rx_bits_headers).tobytes()
     t5 = time.time()
-    print("[DEC] packbits headers took: " + str(t5 - t4))
-    
+    _rt_print(_RUNTIME, "[DEC] packbits headers took: ", t5 - t4)
+
     if USE_RS_FOR_HEADERS:
         try:
             t_rs_headers = time.time()
             decoded_headers = bytes(rsc.decode(bytearray(rx_bytes))[0])
             end_t_rs_headers = time.time()
-            print("[DEC] rs decode for headers time " + str(end_t_rs_headers - t_rs_headers))
+            _rt_print(_RUNTIME, "[DEC] rs decode for headers time ", end_t_rs_headers - t_rs_headers)
         except ReedSolomonError as e:
             raise ValueError(f"Header RS decoding failed: {e}")
     else:
@@ -227,7 +239,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     if USE_MARKER_CODEWORDS:
         t = time.time()
         data_bytes = _decode_data_with_codewords_popcnt(protected_data.astype(np.int8, copy=False), _TOKENS, _CODES_PACKED, MARKER_CODEWORD_LEN, MARKER_DET_THRESH)
-        print("[DEC] Marker codewords decode took: " + str(time.time() - t))
+        _rt_print(_RUNTIME, "[DEC] Marker codewords decode took: ", time.time() - t)
     else:
         t = time.time()
         if USE_PRBS_FOR_DATA:
@@ -238,7 +250,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
         else:
             rx_bits_data = ((protected_data + 1) / 2).astype(np.uint8)
         data_bytes = np.packbits(rx_bits_data).tobytes()
-        print("[DEC] Despread/map+packbits data took: " + str(time.time() - t))
+        _rt_print(_RUNTIME, "[DEC] Despread/map+packbits data took: ", time.time() - t)
 
     
     if USE_RS_FOR_DATA:
@@ -263,21 +275,22 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
                 k_last = max(0, len(blk) - ECC_SYMBOLS)
                 decoded_chunks.append(blk[:k_last])
         decoded_data = b"".join(decoded_chunks)
-        print("[DEC] RS data (chunked) took " + str(time.time() - t_rs_data))
+        _rt_print(_RUNTIME, "[DEC] RS data (chunked) took: ", time.time() - t_rs_data)
     else:
         decoded_data = data_bytes
     
     t = time.time()
     fixed_data = fix_false_markers(decoded_data)
-    print("[DEC] fix_false_markers took: " + str(time.time() - t))
+    _rt_print(_RUNTIME, "[DEC] fix_false_markers took: ", time.time() - t)
 
     t7 = time.time()
     result = merge_jpeg(decoded_headers, fixed_data)
-    print("[DEC] merge_jpeg took: " + str(time.time() - t7))
-    print(f"Total decode time: {time.time() - t0} sec")
+    _rt_print(_RUNTIME, "[DEC] merge_jpeg took: ", time.time() - t7)
+    _rt_print(_RUNTIME, "Total decode time: ", time.time() - t0, " sec")
     return result
 
 if __name__ == "__main__":
+    _rt_init(save_runtime, _RUNTIME, OS)
     cap = cv2.VideoCapture(PATH_TO_VIDEO)
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
@@ -291,6 +304,7 @@ if __name__ == "__main__":
     frame_count = 0
     while cap.isOpened():
         frame_count += 1
+        _rt_set_frame(frame_count, _RUNTIME)
         frame_start = time.time()
         success, frame = cap.read()
         if not success:
@@ -299,7 +313,7 @@ if __name__ == "__main__":
         print(f"Original: {w}×{h}")
         
         frame_proc = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
-        encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 30, cv2.IMWRITE_JPEG_RST_INTERVAL, 10]
+        encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 70, cv2.IMWRITE_JPEG_RST_INTERVAL, 10]
         _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
         headers, compressed = split_jpeg(encoded_image.tobytes())
         
@@ -398,6 +412,7 @@ if __name__ == "__main__":
 
         mosaic = _compose_grid(orig_vis, analog_vis, enc_vis, rec_vis, gap=20)
         cv2.imshow('Monitor', mosaic)
+        _rt_flush_if_ready(_RUNTIME, OS)
         delay_ms = max(1, int(1000.0 / fps - (time.time() - frame_start) * 1000.0))
         if cv2.waitKey(delay_ms) & 0xFF == ord('q'):
             break

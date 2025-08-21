@@ -1,0 +1,54 @@
+{
+  "os": "windows",
+  "runs": [
+    {
+      "timestamp": "2025-08-21 15:18:45",
+      "os": "windows",
+      "frames_used": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "averages_ms": {
+        "[ENC] rs encode for headers took": "0.02986192703247070300",
+        "[ENC] PRBS/map headers:": "0.11372566223144531000",
+        "[ENC] rs encode (chunked) took": "0.50926208496093750000",
+        "[ENC] Marker codewords encode:": "0.97924470901489260000",
+        "[ENC] Concat full stream:": "0.15175342559814453000",
+        "[ENC] Full stream length:": null,
+        "[ENC] took:": "2.75176763534545900000",
+        "[DEC] Threshold->±1 took:": "0.29438734054565430000",
+        "[DEC] 3×correlate:": "35.97760200500488000000",
+        "[DEC] PRBS/map headers took:": "0.10639429092407227000",
+        "[DEC] packbits headers took:": "0.01066923141479492200",
+        "[DEC] rs decode for headers time": "0.31542778015136720000",
+        "[DEC] Marker codewords decode took:": "11.79039478302002000000",
+        "[DEC] RS data (chunked) took:": "26.53235197067260700000",
+        "[DEC] fix_false_markers took:": "0.04345178604125976600",
+        "[DEC] merge_jpeg took:": "0.00929832458496093800",
+        "Total decode time:": "77.17037200927734000000"
+      },
+      "averages_ms_float": {
+        "[ENC] rs encode for headers took": 0.029861927032470703,
+        "[ENC] PRBS/map headers:": 0.11372566223144531,
+        "[ENC] rs encode (chunked) took": 0.5092620849609375,
+        "[ENC] Marker codewords encode:": 0.9792447090148926,
+        "[ENC] Concat full stream:": 0.15175342559814453,
+        "[ENC] Full stream length:": 255157000.0,
+        "[ENC] took:": 2.751767635345459,
+        "[DEC] Threshold->±1 took:": 0.2943873405456543,
+        "[DEC] 3×correlate:": 35.97760200500488,
+        "[DEC] PRBS/map headers took:": 0.10639429092407227,
+        "[DEC] packbits headers took:": 0.010669231414794922,
+        "[DEC] rs decode for headers time": 0.3154277801513672,
+        "[DEC] Marker codewords decode took:": 11.79039478302002,
+        "[DEC] RS data (chunked) took:": 26.532351970672607,
+        "[DEC] fix_false_markers took:": 0.043451786041259766,
+        "[DEC] merge_jpeg took:": 0.009298324584960938,
+        "Total decode time:": 77.17037200927734
+      },
+      "improvements_vs_prev": null
+    }
+  ]
+}
