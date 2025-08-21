@@ -8,7 +8,7 @@ from scipy import signal
 import cv2
 import time
 from protected_jpeg import split_jpeg, merge_jpeg, fix_false_markers
-from helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127
+from helpers.helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127
 
 # Config
 FRAME_WIDTH = 720

@@ -8,10 +8,10 @@ from scipy import signal
 import cv2
 import time
 from protected_jpeg import split_jpeg, merge_jpeg, fix_false_markers
-from helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127, _decode_data_with_codewords_popcnt
-from helpers import _build_marker_codewords_gold, _is_marker_token_at, _encode_data_with_codewords_fast, _decode_data_with_codewords_fast
-from gui_helpers import _to_bgr, _compose_grid, _label
-from runtime_helpers import _rt_init, _rt_set_frame, _rt_record, _rt_print, _rt_flush_if_ready
+from helpers.helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127, _decode_data_with_codewords_popcnt
+from helpers.helpers import _build_marker_codewords_gold, _is_marker_token_at, _encode_data_with_codewords_fast, _decode_data_with_codewords_fast
+from helpers.gui_helpers import _to_bgr, _compose_grid, _label
+from helpers.runtime_helpers import _rt_init, _rt_set_frame, _rt_record, _rt_print, _rt_flush_if_ready
 
 # Config
 FRAME_WIDTH = 720
