@@ -8,7 +8,7 @@ from scipy import signal
 import cv2
 import time
 from protected_jpeg import split_jpeg, merge_jpeg, fix_false_markers
-from helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127
+from helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127, _decode_data_with_codewords_popcnt
 from helpers import _build_marker_codewords_gold, _is_marker_token_at, _encode_data_with_codewords_fast, _decode_data_with_codewords_fast
 from gui_helpers import _to_bgr, _compose_grid, _label
 
@@ -35,6 +35,7 @@ if USE_MARKER_CODEWORDS:
     codewords_time = time.time()
     MARKER_TOKENS = [bytes([0xFF, 0xD0 + i]) for i in range(8)] + [b"\xFF\x00"]
     _TOKENS, _CODES = _build_marker_codewords_gold(MARKER_CODEWORD_LEN, MARKER_TOKENS)
+    _CODES_PACKED = np.packbits((_CODES > 0).astype(np.uint8), axis=1)
     means = _CODES.mean(axis=1)
 
     norm = (_CODES @ _CODES.T) / _CODES.shape[1]
@@ -225,7 +226,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     protected_data = received_pm[data_start:data_end]
     if USE_MARKER_CODEWORDS:
         t = time.time()
-        data_bytes = _decode_data_with_codewords_fast(protected_data.astype(np.int8, copy=False), _TOKENS, _CODES, MARKER_DET_THRESH)
+        data_bytes = _decode_data_with_codewords_popcnt(protected_data.astype(np.int8, copy=False), _TOKENS, _CODES_PACKED, MARKER_CODEWORD_LEN, MARKER_DET_THRESH)
         print("[DEC] Marker codewords decode took: " + str(time.time() - t))
     else:
         t = time.time()
