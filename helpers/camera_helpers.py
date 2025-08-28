@@ -21,21 +21,69 @@ def open_capture(input_source: str, os_name: str, path: str, cam_index: int, wid
     backends = []
 
     if os_name == "windows":
-        # Try DirectShow (often best), then Media Foundation, then default
         backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
+
     elif os_name in ("raspberry_pi", "raspberry"):
-        gst = (
+        gst_bgr = (
             "libcamerasrc ! "
-            "video/x-raw,width={w},height={h},framerate={fps}/1 ! "
-            "videoconvert ! video/x-raw,format=BGR ! "
-            "appsink drop=true max-buffers=1 sync=false"
-        ).format(w=width, h=height, fps=int(target_fps))
-        cap = cv2.VideoCapture(gst, cv2.CAP_GSTREAMER)
+            "video/x-raw,format=NV12,width=1536,height=864,framerate=30/1 ! "
+            "videoconvert ! "
+            'video/x-raw,format=BGR ! '
+            "appsink name=appsink drop=true max-buffers=1 sync=false caps=video/x-raw,format=BGR"
+        )
+        gst_bgrx = (
+            "libcamerasrc ! "
+            "video/x-raw,format=NV12,width=1536,height=864,framerate=30/1 ! "
+            "videoconvert ! "
+            'video/x-raw,format=BGRx ! '
+            "appsink name=appsink drop=true max-buffers=1 sync=false caps=video/x-raw,format=BGRx"
+        )
+
+        # BGR
+        cap = cv2.VideoCapture(gst_bgr, cv2.CAP_GSTREAMER)
         if not cap.isOpened():
             raise RuntimeError("Failed to open CSI camera via GStreamer/libcamera. "
                             "Check that OpenCV was built with GStreamer and libcamera is installed.")
-        # libcamera/appsink don’t reliably report FPS; just use target
+
+        # warm-up
+        t0 = time.time()
+        ok = False; frame = None
+        while time.time() - t0 < 3.0:
+            ok, frame = cap.read()
+            if ok and frame is not None and frame.size:
+                try:
+                    hh, ww = frame.shape[:2]
+                    print(f"[Gst/OpenCV] First frame via BGR: {ww}x{hh}, dtype={frame.dtype}")
+                except Exception:
+                    pass
+                break
+            time.sleep(0.01)
+
+        # fallback to BGRx
+        if not ok:
+            cap.release()
+            cap = cv2.VideoCapture(gst_bgrx, cv2.CAP_GSTREAMER)
+            if not cap.isOpened():
+                raise RuntimeError("CSI camera open failed (BGR and BGRx). Check OpenCV+GStreamer build.")
+            t0 = time.time(); ok = False; frame = None
+            while time.time() - t0 < 3.0:
+                ok, frame = cap.read()
+                if ok and frame is not None and frame.size:
+                    try:
+                        hh, ww = frame.shape[:2]
+                        print(f"[Gst/OpenCV] First frame via BGRx: {ww}x{hh}, dtype={frame.dtype}")
+                    except Exception:
+                        pass
+                    break
+                time.sleep(0.01)
+
+        if not ok:
+            cap.release()
+            raise RuntimeError("Camera opened but no frames arrived after BGR and BGRx trials (caps negotiation failed).")
+
+        # libcamera לא תמיד מדווח FPS אמין ל-OpenCV; נחזיר את היעד
         return cap, float(target_fps)
+
     else:
         backends = [cv2.CAP_ANY]
 
@@ -44,13 +92,11 @@ def open_capture(input_source: str, os_name: str, path: str, cam_index: int, wid
         try:
             cap = cv2.VideoCapture(cam_index, be)
             if not cap.isOpened():
-                # try plain constructor if backend form failed
                 cap.release()
                 cap = cv2.VideoCapture(cam_index)
             if not cap.isOpened():
                 continue
 
-            # Try to set desired mode
             cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
             cap.set(cv2.CAP_PROP_FPS,         target_fps)
@@ -58,7 +104,7 @@ def open_capture(input_source: str, os_name: str, path: str, cam_index: int, wid
             if os_name == "windows":
                 cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
 
-            # Warm-up: let exposure/white-balance settle
+            # warm-up
             for _ in range(8):
                 cap.read()
                 time.sleep(0.01)
