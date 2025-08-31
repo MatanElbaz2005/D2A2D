@@ -2,7 +2,7 @@
   "os": "raspberry_pi",
   "runs": [
     {
-      "timestamp": "2025-08-31 10:22:37",
+      "timestamp": "2025-08-31 10:32:44",
       "os": "raspberry_pi",
       "frames_used": [
         2,
@@ -11,33 +11,32 @@
         5
       ],
       "averages_ms": {
-        "[ENC] rs encode for headers took": 0.1475214958190918,
-        "[ENC] PRBS/map headers:": 0.39768218994140625,
-        "[ENC] rs encode (chunked) took": 1.7684102058410645,
-        "[ENC] PRBS/map data:": 0.34558773040771484,
-        "[ENC] Concat full stream:": 0.29790401458740234,
-        "[ENC] Full stream length:": 210965000.0,
-        "[ENC] took:": 4.662275314331055,
-        "[DEC] Threshold->±1 took:": 0.45603513717651367,
-        "[DEC] 3×correlate:": 123.56311082839966,
-        "[DEC] PRBS/map headers took:": 0.29861927032470703,
-        "[DEC] packbits headers took:": 0.028133392333984375,
-        "[DEC] rs decode for headers time": 1.737534999847412,
-        "[DEC] Despread/map+packbits data took:": 1.090705394744873,
-        "[DEC] RS data (chunked) took:": 104.24363613128662,
-        "[DEC] fix_false_markers took:": 0.09208917617797852,
-        "[DEC] merge_jpeg took:": 0.012874603271484375,
-        "Total decode time:": 235.1456880569458
+        "[ENC] rs encode for headers took": 0.13387203216552734,
+        "[ENC] PRBS/map headers:": 0.37348270416259766,
+        "[ENC] rs encode (chunked) took": 1.834869384765625,
+        "[ENC] Marker codewords encode:": 2.430140972137451,
+        "[ENC] Concat full stream:": 0.30672550201416016,
+        "[ENC] Full stream length:": 223591000.0,
+        "[ENC] took:": 6.86269998550415,
+        "[DEC] Threshold->±1 took:": 0.4703998565673828,
+        "[DEC] 3×correlate:": 123.08555841445923,
+        "[DEC] PRBS/map headers took:": 0.3235340118408203,
+        "[DEC] packbits headers took:": 0.031828880310058594,
+        "[DEC] rs decode for headers time": 1.750171184539795,
+        "[DEC] Marker codewords decode took:": 30.952513217926025,
+        "[DEC] RS data (chunked) took:": 118.92008781433105,
+        "[DEC] fix_false_markers took:": 0.09387731552124023,
+        "[DEC] merge_jpeg took:": 0.01537799835205078,
+        "Total decode time:": 279.43938970565796
       },
       "highlights_block": [
         "--------------------------------",
-        "[ENC] took: 4.662275314331055 ms",
+        "[ENC] took: 6.86269998550415 ms",
         "--------------------------------",
         "--------------------------------",
-        "Total decode time: 235.1456880569458 ms",
+        "Total decode time: 279.43938970565796 ms",
         "--------------------------------"
-      ],
-      "improvements_vs_prev": null
+      ]
     }
   ]
 }
