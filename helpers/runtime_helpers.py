@@ -47,29 +47,38 @@ def _rt_print(_RUNTIME, label: str, seconds: float, suffix: str = "", extra: str
     _rt_record(label.strip(), seconds, _RUNTIME)
 
 def _rt_flush_if_ready(_RUNTIME, OS):
-    if not _RUNTIME["enabled"]:
+    if not _RUNTIME.get("enabled"):
         return
-    if _RUNTIME["flushed"]:
+    if _RUNTIME.get("flushed"):
         return
-    if _RUNTIME["frame"] < 5:
+    if _RUNTIME.get("frame", 0) < 5:
         return
+
+    HIGHLIGHT_KEYS = ("[ENC] took:", "Total decode time:")
 
     averages_sec = {
         k: (sum(v) / len(v) if v else None)
         for k, v in _RUNTIME["collected"].items()
     }
 
-    averages_ms = {k: (_to_ms_str(v) if v is not None else None) for k, v in averages_sec.items()}
-
-    averages_ms_float = {}
+    averages_ms = {}
     for k, v in averages_sec.items():
         if v is None or not math.isfinite(v):
-            averages_ms_float[k] = None
+            averages_ms[k] = None
         else:
             try:
-                averages_ms_float[k] = float(Decimal(str(v)) * Decimal("1000"))
+                averages_ms[k] = float(Decimal(str(v)) * Decimal("1000"))
             except (InvalidOperation, ValueError):
-                averages_ms_float[k] = None
+                averages_ms[k] = None
+
+    highlights_block = []
+    for key in HIGHLIGHT_KEYS:
+        val = averages_ms.get(key)
+        if val is not None and math.isfinite(val):
+            highlights_block.append("--------------------------------")
+            highlights_block.append(f"{key} {val} ms")
+            highlights_block.append("--------------------------------")
+
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -78,12 +87,12 @@ def _rt_flush_if_ready(_RUNTIME, OS):
         "os": OS,
         "frames_used": [2, 3, 4, 5],
         "averages_ms": averages_ms,
-        "averages_ms_float": averages_ms_float,
+        "highlights_block": highlights_block,
         "improvements_vs_prev": None
+
     }
 
     fn = _RUNTIME["filename"]
-    legacy = _RUNTIME.get("legacy_fn")
 
     root = None
     if os.path.exists(fn):
@@ -98,9 +107,9 @@ def _rt_flush_if_ready(_RUNTIME, OS):
 
     prev_run = root["runs"][-1] if root["runs"] else None
     if prev_run:
-        prev_avg = prev_run.get("averages_ms_float", {})
+        prev_avg = prev_run.get("averages_ms", {})
         improvements = {}
-        for k, cur in averages_ms_float.items():
+        for k, cur in averages_ms.items():
             pv = prev_avg.get(k)
             if cur is None or pv is None:
                 continue

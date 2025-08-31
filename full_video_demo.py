@@ -40,14 +40,14 @@ MARKER_DET_THRESH   = 0.80
 INPUT_SOURCE = "camera"       # "camera" or "file"
 CAMERA_INDEX = 0            # 0=default webcam
 TARGET_FPS   = 25.0         # desired camera FPS
-PATH_TO_VIDEO = r"C:\Users\matan\OneDrive\מסמכים\Matan\D2A2D\1572378-sd_960_540_24fps.mp4"
+PATH_TO_VIDEO = r"/home/matan/Documents/matan/D2A2D/1572378-sd_960_540_24fps.mp4"
 
 # Noise config
 GAUSS_NOISE = 50.0
 
 # Runtime json config
 save_runtime = True
-OS = "windows"  # "windows" or "raspberry_pi"
+OS = "raspberry_pi"  # "windows" or "raspberry_pi"
 
 _RUNTIME = {
     "enabled": False,
