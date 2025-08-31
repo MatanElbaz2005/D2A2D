@@ -78,9 +78,13 @@ rsc = RSCodec(ECC_SYMBOLS)
 _rt_print(_RUNTIME, "[ENC] preper RS took ", time.time() - perp_rsc_time)
 
 # Sync patterns (gold codes, ±1)
-HEADERS_SYNC_PATTERN = gold127(shift=0)
-DATA_SYNC_PATTERN    = gold127(shift=17)
-END_SYNC_PATTERN     = gold127(shift=53)
+HEADERS_SYNC_PATTERN = gold127(shift=0).astype(np.int8, copy=False)
+DATA_SYNC_PATTERN    = gold127(shift=17).astype(np.int8, copy=False)
+END_SYNC_PATTERN     = gold127(shift=53).astype(np.int8, copy=False)
+
+T_HDR = HEADERS_SYNC_PATTERN.astype(np.float32, copy=False).reshape(1, -1)
+T_DAT = DATA_SYNC_PATTERN.astype(np.float32, copy=False).reshape(1, -1)
+T_END = END_SYNC_PATTERN.astype(np.float32, copy=False).reshape(1, -1)
 
 # PRBS for spreading (if enabled)
 prbs_headers_time = time.time()
@@ -185,9 +189,10 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     _rt_print(_RUNTIME, "[DEC] Threshold->±1 took: ", t1 - t0)
 
     t = time.time()
-    corr_headers = signal.correlate(received_pm, HEADERS_SYNC_PATTERN, mode='valid') / len(HEADERS_SYNC_PATTERN)
-    corr_data    = signal.correlate(received_pm, DATA_SYNC_PATTERN,    mode='valid') / len(DATA_SYNC_PATTERN)
-    corr_end     = signal.correlate(received_pm, END_SYNC_PATTERN,     mode='valid') / len(END_SYNC_PATTERN)
+    src = received_pm.astype(np.float32, copy=False).reshape(1, -1)  # 1×N
+    corr_headers = cv2.matchTemplate(src, T_HDR, cv2.TM_CCORR_NORMED).ravel()
+    corr_data    = cv2.matchTemplate(src, T_DAT, cv2.TM_CCORR_NORMED).ravel()
+    corr_end     = cv2.matchTemplate(src, T_END, cv2.TM_CCORR_NORMED).ravel()
     _rt_print(_RUNTIME, "[DEC] 3×correlate: ", time.time()-t, "s")
     
     if np.max(corr_headers) < corr_threshold or np.max(corr_data) < corr_threshold or np.max(corr_end) < corr_threshold:
