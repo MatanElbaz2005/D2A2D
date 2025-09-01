@@ -301,6 +301,8 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     return result
 
 if __name__ == "__main__":
+    cv2.setUseOptimized(True)
+    cv2.setNumThreads(0)
     _rt_init(save_runtime, _RUNTIME, OS)
     cap, fps = open_capture(INPUT_SOURCE, OS, PATH_TO_VIDEO, CAMERA_INDEX, FRAME_WIDTH, FRAME_HEIGHT, TARGET_FPS)
 
