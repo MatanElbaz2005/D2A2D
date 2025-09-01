@@ -4,7 +4,6 @@ try:
 except ImportError:
     print("cant find creedsolo, using reedsolo instead")
     from reedsolo import RSCodec, ReedSolomonError
-from scipy import signal
 import cv2
 import time
 from protected_jpeg import split_jpeg, merge_jpeg, fix_false_markers
@@ -82,9 +81,9 @@ HEADERS_SYNC_PATTERN = gold127(shift=0).astype(np.int8, copy=False)
 DATA_SYNC_PATTERN    = gold127(shift=17).astype(np.int8, copy=False)
 END_SYNC_PATTERN     = gold127(shift=53).astype(np.int8, copy=False)
 
-T_HDR = HEADERS_SYNC_PATTERN.astype(np.float32, copy=False).reshape(1, -1)
-T_DAT = DATA_SYNC_PATTERN.astype(np.float32, copy=False).reshape(1, -1)
-T_END = END_SYNC_PATTERN.astype(np.float32, copy=False).reshape(1, -1)
+T_HDR = np.ascontiguousarray(HEADERS_SYNC_PATTERN, dtype=np.float32).reshape(1, -1)
+T_DAT = np.ascontiguousarray(DATA_SYNC_PATTERN, dtype=np.float32).reshape(1, -1)
+T_END = np.ascontiguousarray(END_SYNC_PATTERN, dtype=np.float32).reshape(1, -1)
 
 # PRBS for spreading (if enabled)
 prbs_headers_time = time.time()
@@ -189,10 +188,13 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     _rt_print(_RUNTIME, "[DEC] Threshold->±1 took: ", t1 - t0)
 
     t = time.time()
-    src = received_pm.astype(np.float32, copy=False).reshape(1, -1)  # 1×N
+    src = np.ascontiguousarray(received_pm, dtype=np.float32).reshape(1, -1)
     corr_headers = cv2.matchTemplate(src, T_HDR, cv2.TM_CCORR_NORMED).ravel()
     corr_data    = cv2.matchTemplate(src, T_DAT, cv2.TM_CCORR_NORMED).ravel()
-    corr_end     = cv2.matchTemplate(src, T_END, cv2.TM_CCORR_NORMED).ravel()
+
+    _est_data_start = int(np.argmax(corr_data)) + T_DAT.shape[1]
+    src_end = src[:, _est_data_start:] if _est_data_start < src.shape[1] else src[:, -T_END.shape[1]:]
+    corr_end = cv2.matchTemplate(src_end, T_END, cv2.TM_CCORR_NORMED).ravel()
     _rt_print(_RUNTIME, "[DEC] 3×correlate: ", time.time()-t, "s")
     
     if np.max(corr_headers) < corr_threshold or np.max(corr_data) < corr_threshold or np.max(corr_end) < corr_threshold:
@@ -200,7 +202,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     
     headers_start = np.argmax(corr_headers) + len(HEADERS_SYNC_PATTERN)
     data_start = np.argmax(corr_data) + len(DATA_SYNC_PATTERN)
-    data_end = np.argmax(corr_end)
+    data_end = _est_data_start + int(np.argmax(corr_end))
     
     if not (headers_start < data_start < data_end):
         raise ValueError(f"Invalid sync pattern order: headers_start={headers_start}, data_start={data_start}, data_end={data_end}")
