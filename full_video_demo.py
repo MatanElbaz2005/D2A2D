@@ -7,11 +7,12 @@ except ImportError:
 import cv2
 import time
 from protected_jpeg import split_jpeg, merge_jpeg, fix_false_markers
-from helpers.helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127, _decode_data_with_codewords_popcnt
-from helpers.helpers import _build_marker_codewords_gold, _is_marker_token_at, _encode_data_with_codewords_fast, _decode_data_with_codewords_fast
-from helpers.gui_helpers import _to_bgr, _compose_grid, _label
-from helpers.runtime_helpers import _rt_init, _rt_set_frame, _rt_record, _rt_print, _rt_flush_if_ready
-from helpers.camera_helpers import open_capture
+from helpers_files.helpers import generate_prbs, _mseq_127_taps_7_1, _mseq_127_taps_7_3, gold127, _decode_data_with_codewords_popcnt
+from helpers_files.helpers import _build_marker_codewords_gold, _is_marker_token_at, _encode_data_with_codewords_fast, _decode_data_with_codewords_fast
+from helpers_files.gui_helpers import _to_bgr, _compose_grid, _label
+from helpers_files.runtime_helpers import _rt_init, _rt_set_frame, _rt_record, _rt_print, _rt_flush_if_ready
+from helpers_files.camera_helpers import open_capture
+from helpers_files.correlation_helpers import binary_sync_correlate_roi
 
 # Frame config
 FRAME_WIDTH = 720
@@ -81,9 +82,19 @@ HEADERS_SYNC_PATTERN = gold127(shift=0).astype(np.int8, copy=False)
 DATA_SYNC_PATTERN    = gold127(shift=17).astype(np.int8, copy=False)
 END_SYNC_PATTERN     = gold127(shift=53).astype(np.int8, copy=False)
 
-T_HDR = np.ascontiguousarray(HEADERS_SYNC_PATTERN, dtype=np.float32).reshape(1, -1)
-T_DAT = np.ascontiguousarray(DATA_SYNC_PATTERN, dtype=np.float32).reshape(1, -1)
-T_END = np.ascontiguousarray(END_SYNC_PATTERN, dtype=np.float32).reshape(1, -1)
+_HDR_PACK  = np.packbits((HEADERS_SYNC_PATTERN > 0).astype(np.uint8), bitorder="big")
+_DAT_PACK  = np.packbits((DATA_SYNC_PATTERN    > 0).astype(np.uint8), bitorder="big")
+_END_PACK  = np.packbits((END_SYNC_PATTERN     > 0).astype(np.uint8), bitorder="big")
+
+def _last_byte_mask(bit_length: int) -> np.uint8:
+    rem = bit_length % 8
+    if rem == 0:
+        return np.uint8(0xFF)
+    return np.uint8((0xFF << (8 - rem)) & 0xFF)
+
+_HDR_MASK = _last_byte_mask(HEADERS_SYNC_PATTERN.size)
+_DAT_MASK = _last_byte_mask(DATA_SYNC_PATTERN.size)
+_END_MASK = _last_byte_mask(END_SYNC_PATTERN.size)
 
 # PRBS for spreading (if enabled)
 prbs_headers_time = time.time()
@@ -188,21 +199,16 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     _rt_print(_RUNTIME, "[DEC] Threshold->±1 took: ", t1 - t0)
 
     t = time.time()
-    src = np.ascontiguousarray(received_pm, dtype=np.float32).reshape(1, -1)
-    corr_headers = cv2.matchTemplate(src, T_HDR, cv2.TM_CCORR_NORMED).ravel()
-    corr_data    = cv2.matchTemplate(src, T_DAT, cv2.TM_CCORR_NORMED).ravel()
+    corr_headers, corr_data, corr_end_roi, data_start_est = binary_sync_correlate_roi(received_pm, HEADERS_SYNC_PATTERN, DATA_SYNC_PATTERN, END_SYNC_PATTERN
+    )
+    _rt_print(_RUNTIME, "[DEC] 3×correlate: ", time.time() - t, "s")
 
-    _est_data_start = int(np.argmax(corr_data)) + T_DAT.shape[1]
-    src_end = src[:, _est_data_start:] if _est_data_start < src.shape[1] else src[:, -T_END.shape[1]:]
-    corr_end = cv2.matchTemplate(src_end, T_END, cv2.TM_CCORR_NORMED).ravel()
-    _rt_print(_RUNTIME, "[DEC] 3×correlate: ", time.time()-t, "s")
-    
-    if np.max(corr_headers) < corr_threshold or np.max(corr_data) < corr_threshold or np.max(corr_end) < corr_threshold:
-        raise ValueError(f"Sync not detected: headers={np.max(corr_headers)}, data={np.max(corr_data)}, end={np.max(corr_end)}")
-    
-    headers_start = np.argmax(corr_headers) + len(HEADERS_SYNC_PATTERN)
-    data_start = np.argmax(corr_data) + len(DATA_SYNC_PATTERN)
-    data_end = _est_data_start + int(np.argmax(corr_end))
+    if (np.max(corr_headers) < corr_threshold or np.max(corr_data) < corr_threshold or np.max(corr_end_roi) < corr_threshold):
+        raise ValueError(f"Sync not detected: headers={np.max(corr_headers)}, data={np.max(corr_data)}, end={np.max(corr_end_roi)}")
+
+    headers_start = int(np.argmax(corr_headers)) + len(HEADERS_SYNC_PATTERN)
+    data_start    = int(np.argmax(corr_data))    + len(DATA_SYNC_PATTERN)
+    data_end      = data_start_est + int(np.argmax(corr_end_roi))
     
     if not (headers_start < data_start < data_end):
         raise ValueError(f"Invalid sync pattern order: headers_start={headers_start}, data_start={data_start}, data_end={data_end}")
