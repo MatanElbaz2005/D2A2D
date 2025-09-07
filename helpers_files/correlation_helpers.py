@@ -15,13 +15,13 @@ def binary_sync_correlate_roi(
     Returns (corr_headers, corr_data, corr_end_roi, data_start_est).
     """
     # Headers & data over the full range
-    ch = binxcorr.correlate_sliding_bin(received_pm, headers_pm)  # float32
-    cd = binxcorr.correlate_sliding_bin(received_pm, data_pm)
+    ch = binxcorr.correlate_sliding_bin(received_pm, headers_pm, debug=True)  # float32
+    cd = binxcorr.correlate_sliding_bin(received_pm, data_pm, debug=True)
 
     data_start_est = int(np.argmax(cd)) + data_pm.size
 
     # END only over ROI starting at the estimated data start
     ce_roi = binxcorr.correlate_sliding_bin(
-        received_pm, end_pm, start_bit=data_start_est, end_bit=received_pm.size
+        received_pm, end_pm, start_bit=data_start_est, end_bit=received_pm.size, debug=True
     )
     return ch, cd, ce_roi, data_start_est
