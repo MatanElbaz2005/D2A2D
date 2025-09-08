@@ -437,6 +437,63 @@
         "[DEC] merge_jpeg took:": "0.00339746475219726560 ms (34.54545454545455000000 %)",
         "Total decode time:": "25.11936426162719700000 ms (19.19015158759431500000 %)"
       }
+    },
+    {
+      "timestamp": "2025-09-08 11:35:23",
+      "os": "raspberry_pi",
+      "whats new?": "optimized corr: skip second 64-bit chunk if first already worse than best",
+      "frames_used": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "averages_ms": {
+        "[ENC] rs encode for headers took": 0.1380443572998047,
+        "[ENC] PRBS/map headers:": 0.4398226737976074,
+        "[ENC] rs encode (chunked) took": 1.817166805267334,
+        "[ENC] Marker codewords encode:": 3.150761127471924,
+        "[ENC] Concat full stream:": 0.11998414993286133,
+        "[ENC] Full stream length:": 210899000.0,
+        "[ENC] took:": 7.847785949707031,
+        "[DEC] Threshold->±1 took:": 0.46759843826293945,
+        "[DEC] 3×correlate:": 8.013010025024414,
+        "[DEC] PRBS/map headers took:": 0.3637075424194336,
+        "[DEC] packbits headers took:": 0.03075599670410156,
+        "[DEC] rs decode for headers time": 1.645982265472412,
+        "[DEC] Marker codewords decode took:": 32.734572887420654,
+        "[DEC] RS data (chunked) took:": 106.93567991256714,
+        "[DEC] fix_false_markers took:": 0.08410215377807617,
+        "[DEC] merge_jpeg took:": 0.012934207916259766,
+        "Total decode time:": 151.69215202331543
+      },
+      "highlights_block": [
+        "--------------------------------",
+        "[ENC] took: 7.847785949707031 ms",
+        "--------------------------------",
+        "--------------------------------",
+        "Total decode time: 151.69215202331543 ms",
+        "--------------------------------"
+      ],
+      "improvements_vs_prev": {
+        "[ENC] rs encode for headers took": "-0.00268220901489257800 ms (-1.90597204574332910000 %)",
+        "[ENC] PRBS/map headers:": "-0.03260374069213867000 ms (-6.90133737067877800000 %)",
+        "[ENC] rs encode (chunked) took": "0.00542402267456054700 ms (0.29938149756546917000 %)",
+        "[ENC] Marker codewords encode:": "0.78302621841430660000 ms (33.07068774544356400000 %)",
+        "[ENC] Concat full stream:": "-0.02557039260864257800 ms (-17.56756756756757000000 %)",
+        "[ENC] Full stream length:": "-15360000.00000000000000000000 ms (-6.78868022929474700000 %)",
+        "[ENC] took:": "1.35618448257446300000 ms (20.89137001772089000000 %)",
+        "[DEC] Threshold->±1 took:": "0.09828805923461914000 ms (26.61394448030987500000 %)",
+        "[DEC] 3×correlate:": "-2.53838300704956050000 ms (-24.05732588420714000000 %)",
+        "[DEC] PRBS/map headers took:": "0.04005432128906250000 ms (12.37569060773480700000 %)",
+        "[DEC] packbits headers took:": "0.00596046447753905900 ms (24.03846153846152600000 %)",
+        "[DEC] rs decode for headers time": "-0.08457899093627930000 ms (-4.88737342426121100000 %)",
+        "[DEC] Marker codewords decode took:": "1.76662206649780270000 ms (5.70467861019793900000 %)",
+        "[DEC] RS data (chunked) took:": "-3.02112102508544900000 ms (-2.74755267461671340000 %)",
+        "[DEC] fix_false_markers took:": "0.00166893005371093750 ms (2.02458423716558220000 %)",
+        "[DEC] merge_jpeg took:": "-0.00029802322387695310 ms (-2.25225225225225230000 %)",
+        "Total decode time:": "-4.32437658309936500000 ms (-2.77174259786828970000 %)"
+      }
     }
   ]
 }

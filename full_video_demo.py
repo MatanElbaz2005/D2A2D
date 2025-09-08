@@ -12,7 +12,7 @@ from helpers_files.helpers import _build_marker_codewords_gold, _is_marker_token
 from helpers_files.gui_helpers import _to_bgr, _compose_grid, _label
 from helpers_files.runtime_helpers import _rt_init, _rt_set_frame, _rt_record, _rt_print, _rt_flush_if_ready
 from helpers_files.camera_helpers import open_capture
-from helpers_files.correlation_helpers import binary_sync_correlate_roi
+from helpers_files.correlation_helpers import binary_sync_correlate_roi_argmax
 
 # Frame config
 FRAME_WIDTH = 720
@@ -199,16 +199,16 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     _rt_print(_RUNTIME, "[DEC] Threshold->±1 took: ", t1 - t0)
 
     t = time.time()
-    corr_headers, corr_data, corr_end_roi, data_start_est = binary_sync_correlate_roi(received_pm, HEADERS_SYNC_PATTERN, DATA_SYNC_PATTERN, END_SYNC_PATTERN
-    )
+    (hdr_best_corr, hdr_best_idx), (data_best_corr, data_best_idx), (end_best_corr, end_best_idx), data_start_est = \
+        binary_sync_correlate_roi_argmax(received_pm, HEADERS_SYNC_PATTERN, DATA_SYNC_PATTERN, END_SYNC_PATTERN)
     _rt_print(_RUNTIME, "[DEC] 3×correlate: ", time.time() - t, "s")
 
-    if (np.max(corr_headers) < corr_threshold or np.max(corr_data) < corr_threshold or np.max(corr_end_roi) < corr_threshold):
-        raise ValueError(f"Sync not detected: headers={np.max(corr_headers)}, data={np.max(corr_data)}, end={np.max(corr_end_roi)}")
+    if (hdr_best_corr < corr_threshold or data_best_corr < corr_threshold or end_best_corr < corr_threshold):
+        raise ValueError(f"Sync not detected: headers={hdr_best_corr}, data={data_best_corr}, end={end_best_corr}")
 
-    headers_start = int(np.argmax(corr_headers)) + len(HEADERS_SYNC_PATTERN)
-    data_start    = int(np.argmax(corr_data))    + len(DATA_SYNC_PATTERN)
-    data_end      = data_start_est + int(np.argmax(corr_end_roi))
+    headers_start = int(hdr_best_idx)  + len(HEADERS_SYNC_PATTERN)
+    data_start    = int(data_best_idx) + len(DATA_SYNC_PATTERN)
+    data_end      = int(end_best_idx)
     
     if not (headers_start < data_start < data_end):
         raise ValueError(f"Invalid sync pattern order: headers_start={headers_start}, data_start={data_start}, data_end={data_end}")

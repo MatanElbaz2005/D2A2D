@@ -47,3 +47,38 @@ def binary_sync_correlate_roi(
     )
     return ch, cd, ce_roi, data_start_est
 
+def binary_sync_correlate_roi_argmax(
+    received_pm: np.ndarray,
+    headers_pm: np.ndarray,
+    data_pm: np.ndarray,
+    end_pm: np.ndarray,
+    headers_search_frac: float = 0.10,
+    debug: bool = False,
+):
+    """
+    Same logic as binary_sync_correlate_roi, but returns only (corr, index) per pattern,
+    using the C++ argmax function which includes per-position early-skip.
+
+    Returns:
+        ((ch_corr, ch_idx), (cd_corr, cd_idx), (ce_corr, ce_idx), data_start_est)
+    """
+    N = int(received_pm.size)
+    Lh = int(headers_pm.size)
+    end_hdr = N if headers_search_frac is None else max(Lh, min(N, int(N * headers_search_frac)))
+
+    # 1) Headers in first X%
+    ch_corr, ch_idx = binxcorr.correlate_sliding_bin_argmax(
+        received_pm, headers_pm, 0, end_hdr, debug=debug
+    )
+    # 2) Data on full stream
+    cd_corr, cd_idx = binxcorr.correlate_sliding_bin_argmax(
+        received_pm, data_pm, 0, N, debug=debug
+    )
+    data_start_est = int(cd_idx) + int(data_pm.size)
+
+    # 3) End from data_start_est to end
+    ce_corr, ce_idx = binxcorr.correlate_sliding_bin_argmax(
+        received_pm, end_pm, data_start_est, N, debug=debug
+    )
+
+    return (ch_corr, int(ch_idx)), (cd_corr, int(cd_idx)), (ce_corr, int(ce_idx)), int(data_start_est)

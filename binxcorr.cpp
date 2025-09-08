@@ -48,7 +48,7 @@ static inline uint64_t load64_ptr(const uint64_t* w, size_t n_words, size_t bitp
 
 // -------------------- Python-visible functions --------------------
 
-// (1) Original API: takes ±1 arrays and packs inside (with optional debug timing)
+// (1) Original API: returns full vector of correlations
 py::array_t<float> correlate_sliding_bin(
     py::array_t<int8_t, py::array::c_style | py::array::forcecast> signal_pm,
     py::array_t<int8_t, py::array::c_style | py::array::forcecast> pattern_pm,
@@ -152,6 +152,94 @@ py::array_t<float> correlate_sliding_bin(
     return out;
 }
 
+// (NEW) Argmax-only API on ±1 arrays, with per-position early-skip:
+std::pair<float, int64_t> correlate_sliding_bin_argmax(
+    py::array_t<int8_t, py::array::c_style | py::array::forcecast> signal_pm,
+    py::array_t<int8_t, py::array::c_style | py::array::forcecast> pattern_pm,
+    int64_t start_bit,
+    int64_t end_bit,
+    bool debug
+) {
+    using clock = std::chrono::high_resolution_clock;
+    auto t_all_0 = clock::now();
+
+    // Buffers & sizes
+    auto s_buf = signal_pm.request();
+    auto p_buf = pattern_pm.request();
+    const auto* s_ptr = static_cast<int8_t*>(s_buf.ptr);
+    const auto* p_ptr = static_cast<int8_t*>(p_buf.ptr);
+    const size_t N = static_cast<size_t>(s_buf.size);
+    const size_t L = static_cast<size_t>(p_buf.size);
+    if (L == 0 || N == 0 || N < L) return { -1.0f, -1 };
+
+    // ROI clamp
+    size_t start = static_cast<size_t>(std::max<int64_t>(0, start_bit));
+    size_t end   = static_cast<size_t>(end_bit < 0 ? static_cast<int64_t>(N)
+                                                   : std::min<int64_t>(end_bit, static_cast<int64_t>(N)));
+    if (end <= start || (end - start) < L) return { -1.0f, -1 };
+    const size_t positions = (end - L) - start + 1;
+
+    // Pack
+    auto t_pack_0 = clock::now();
+    std::vector<uint64_t> S = pack_pm_to_bits(s_ptr, N);
+    std::vector<uint64_t> P = pack_pm_to_bits(p_ptr, L);
+    auto t_pack_1 = clock::now();
+
+    const size_t W = (L + 63) >> 6;
+    std::vector<uint64_t> masks(W, ~0ULL);
+    if ((L & 63) != 0) {
+        const unsigned rem = static_cast<unsigned>(L & 63);
+        masks[W - 1] = ((1ULL << rem) - 1ULL);
+    }
+
+    int best_mismatches = static_cast<int>(L);
+    size_t best_pos = 0;
+
+    auto t_loop_0 = clock::now();
+    {
+        py::gil_scoped_release release;
+
+        for (size_t pos = 0; pos < positions; ++pos) {
+            const size_t base = start + pos;
+            int mismatches = 0;
+
+            for (size_t k = 0; k < W; ++k) {
+                const size_t bitpos = base + (k << 6);
+                const uint64_t sigw = load64_vec(S, bitpos);
+                const uint64_t x = (sigw ^ P[k]) & masks[k];
+#if defined(__GNUC__) || defined(__clang__)
+                mismatches += __builtin_popcountll(x);
+#else
+                uint64_t y = x;
+                y = y - ((y >> 1) & 0x5555555555555555ULL);
+                y = (y & 0x3333333333333333ULL) + ((y >> 2) & 0x3333333333333333ULL);
+                mismatches += static_cast<int>((((y + (y >> 4)) & 0x0F0F0F0F0F0F0F0FULL) * 0x0101010101010101ULL) >> 56);
+#endif
+                // per-position early-skip
+                if (mismatches > best_mismatches) break;
+            }
+
+            if (mismatches < best_mismatches) {
+                best_mismatches = mismatches;
+                best_pos = pos;
+            }
+        }
+    }
+    auto t_loop_1 = clock::now();
+
+    const float best_corr = 1.0f - 2.0f * (static_cast<float>(best_mismatches) / static_cast<float>(L));
+    const int64_t best_index = static_cast<int64_t>(start + best_pos);
+
+    if (debug) {
+        auto ms = [](auto dt){ return std::chrono::duration_cast<std::chrono::microseconds>(dt).count()/1000.0; };
+        std::fprintf(stderr,
+            "[binxcorr argmax] pack: %.3f ms, loop: %.3f ms, positions=%zu, W=%zu, best_m=%d, best_corr=%.4f\n",
+            ms(t_pack_1 - t_pack_0), ms(t_loop_1 - t_loop_0), positions, W, best_mismatches, best_corr);
+    }
+
+    return { best_corr, best_index };
+}
+
 // (2) Expose packer as a Python function that returns a numpy array<uint64_t> without copying.
 py::array_t<uint64_t> pack_pm_bits_py(
     py::array_t<int8_t, py::array::c_style | py::array::forcecast> pm) {
@@ -193,7 +281,7 @@ py::array_t<float> correlate_sliding_bin_packed(
     const auto* P = static_cast<uint64_t*>(p_buf.ptr);
     const size_t S_words = static_cast<size_t>(s_buf.size);
     const size_t P_words = static_cast<size_t>(p_buf.size);
-    (void)P_words; // not strictly needed, but kept for sanity
+    (void)P_words;
 
     const size_t N = N_bits;
     const size_t L = L_bits;
@@ -216,7 +304,6 @@ py::array_t<float> correlate_sliding_bin_packed(
     // Compute maximum allowed mismatches from min_corr
     int max_bad = std::numeric_limits<int>::max();
     if (min_corr > -1.0 && min_corr < 1.0) {
-        // corr = 1 - 2*m/L  =>  m = (1 - corr)*L/2
         double m = (1.0 - min_corr) * double(L) * 0.5;
         max_bad = int(std::floor(m));
     }
@@ -246,7 +333,6 @@ py::array_t<float> correlate_sliding_bin_packed(
                 mismatches += static_cast<int>((((y + (y >> 4)) & 0x0F0F0F0F0F0F0F0FULL) * 0x0101010101010101ULL) >> 56);
 #endif
                 if (mismatches > max_bad) {
-                    // Early-exit: even perfect rest can't reach min_corr
                     break;
                 }
             }
@@ -279,11 +365,19 @@ PYBIND11_MODULE(binxcorr, m) {
           "Compute normalized sliding correlation on ±1 arrays (packs internally).\n"
           "Returns float array of length (ROI_len - L + 1).");
 
-    // New: expose packer (±1 -> uint64 bitstream)
+    // (NEW) Argmax-only variant with per-position early-skip
+    m.def("correlate_sliding_bin_argmax", &correlate_sliding_bin_argmax,
+          py::arg("signal_pm"), py::arg("pattern_pm"),
+          py::arg("start_bit") = 0, py::arg("end_bit") = -1,
+          py::arg("debug") = false,
+          "Return only the best correlation and its absolute index in the signal.\n"
+          "Includes per-position early-skip after the first 64-bit word.");
+
+    // Expose packer (±1 -> uint64 bitstream)
     m.def("pack_pm_bits", &pack_pm_bits_py, py::arg("pm"),
           "Pack ±1 int8 array into a uint64 numpy array (1=+1, 0=-1).");
 
-    // New: packed API (no packing cost inside) + early-exit via min_corr
+    // Packed API (no packing cost inside) + early-exit via min_corr
     m.def("correlate_sliding_bin_packed", &correlate_sliding_bin_packed,
           py::arg("signal_u64"), py::arg("N_bits"),
           py::arg("pattern_u64"), py::arg("L_bits"),
