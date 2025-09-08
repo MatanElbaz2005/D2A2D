@@ -12,7 +12,8 @@ from helpers_files.helpers import _build_marker_codewords_gold, _is_marker_token
 from helpers_files.gui_helpers import _to_bgr, _compose_grid, _label
 from helpers_files.runtime_helpers import _rt_init, _rt_set_frame, _rt_record, _rt_print, _rt_flush_if_ready
 from helpers_files.camera_helpers import open_capture
-from helpers_files.correlation_helpers import binary_sync_correlate_roi_argmax
+from helpers_files.helpers import _encode_len_block_chips, _decode_len_block_chips
+import binxcorr
 
 # Frame config
 FRAME_WIDTH = 720
@@ -30,6 +31,10 @@ USE_PRBS_FOR_DATA = False
 CHIP_LENGTH_FOR_HEADERS = 3
 CHIP_LENGTH_FOR_DATA = 1
 DATA_PRBS_POLY = [8, 2]
+
+# Length config
+LENGTH_BITS_PER_FIELD = 32
+LENGTH_CHIP_LENGTH = 7
 
 # Marker codewords config
 USE_MARKER_CODEWORDS = True
@@ -79,12 +84,8 @@ _rt_print(_RUNTIME, "[ENC] preper RS took ", time.time() - perp_rsc_time)
 
 # Sync patterns (gold codes, ±1)
 HEADERS_SYNC_PATTERN = gold127(shift=0).astype(np.int8, copy=False)
-DATA_SYNC_PATTERN    = gold127(shift=17).astype(np.int8, copy=False)
-END_SYNC_PATTERN     = gold127(shift=53).astype(np.int8, copy=False)
 
 _HDR_PACK  = np.packbits((HEADERS_SYNC_PATTERN > 0).astype(np.uint8), bitorder="big")
-_DAT_PACK  = np.packbits((DATA_SYNC_PATTERN    > 0).astype(np.uint8), bitorder="big")
-_END_PACK  = np.packbits((END_SYNC_PATTERN     > 0).astype(np.uint8), bitorder="big")
 
 def _last_byte_mask(bit_length: int) -> np.uint8:
     rem = bit_length % 8
@@ -93,13 +94,17 @@ def _last_byte_mask(bit_length: int) -> np.uint8:
     return np.uint8((0xFF << (8 - rem)) & 0xFF)
 
 _HDR_MASK = _last_byte_mask(HEADERS_SYNC_PATTERN.size)
-_DAT_MASK = _last_byte_mask(DATA_SYNC_PATTERN.size)
-_END_MASK = _last_byte_mask(END_SYNC_PATTERN.size)
 
 # PRBS for spreading (if enabled)
 prbs_headers_time = time.time()
 HEADERS_PRBS = generate_prbs(CHIP_LENGTH_FOR_HEADERS, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_HEADERS else None
 if USE_PRBS_FOR_HEADERS: _rt_print(_RUNTIME, "[ENC] generate PRBS headers took: ", time.time() - prbs_headers_time)
+
+# PRBS for the length block (longer than headers for extra gain)
+prbs_length_time = time.time()
+LENGTH_PRBS = generate_prbs(LENGTH_CHIP_LENGTH, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_HEADERS else None
+if USE_PRBS_FOR_HEADERS: _rt_print(_RUNTIME, "[ENC] generate PRBS length took: ", time.time() - prbs_length_time)
+
 prbs_data_time = time.time()
 DATA_PRBS = generate_prbs(CHIP_LENGTH_FOR_DATA, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_DATA else None
 if USE_PRBS_FOR_DATA: _rt_print(_RUNTIME, "[ENC] generate PRBS data took: ", time.time() - prbs_data_time)
@@ -156,24 +161,30 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
         _rt_print(_RUNTIME, "[ENC] PRBS/map data: ", time.time() - t, "s")
 
     t = time.time()
-    full_stream = np.concatenate((HEADERS_SYNC_PATTERN, protected_headers, DATA_SYNC_PATTERN, protected_data, END_SYNC_PATTERN))
+    len_block_pm = _encode_len_block_chips(
+        hdr_len_chips=len(protected_headers),
+        data_len_chips=len(protected_data),
+        use_prbs=USE_PRBS_FOR_HEADERS,
+        chip_len=LENGTH_CHIP_LENGTH,
+        prbs=LENGTH_PRBS if USE_PRBS_FOR_HEADERS else None,
+        LENGTH_BITS_PER_FIELD=LENGTH_BITS_PER_FIELD
+    )
+    full_stream = np.concatenate((HEADERS_SYNC_PATTERN, len_block_pm, protected_headers, protected_data))
     _rt_print(_RUNTIME, "[ENC] Concat full stream: ", time.time()-t, "s len=", len(full_stream))
 
     s0 = 0
     s1 = s0 + len(HEADERS_SYNC_PATTERN)
-    s2 = s1 + len(protected_headers)
-    s3 = s2 + len(DATA_SYNC_PATTERN)
+    s2 = s1 + len(len_block_pm)
+    s3 = s2 + len(protected_headers)
     s4 = s3 + len(protected_data)
-    s5 = s4 + len(END_SYNC_PATTERN)
 
     tx_meta = {
         "stream_pm": full_stream.astype(np.int8),
         "idx": {
-            "sync_h": (s0, s1),
-            "hdr":    (s1, s2),
-            "sync_d": (s2, s3),
-            "data":   (s3, s4),
-            "sync_e": (s4, s5),
+            "sync": (s0, s1),
+            "len":  (s1, s2),
+            "hdr":  (s2, s3),
+            "data": (s3, s4),
         }
     }
     _rt_print(_RUNTIME, "[ENC] Full stream length: ", len(full_stream), " bits")
@@ -199,23 +210,36 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     _rt_print(_RUNTIME, "[DEC] Threshold->±1 took: ", t1 - t0)
 
     t = time.time()
-    (hdr_best_corr, hdr_best_idx), (data_best_corr, data_best_idx), (end_best_corr, end_best_idx), data_start_est = \
-        binary_sync_correlate_roi_argmax(received_pm, HEADERS_SYNC_PATTERN, DATA_SYNC_PATTERN, END_SYNC_PATTERN)
-    _rt_print(_RUNTIME, "[DEC] 3×correlate: ", time.time() - t, "s")
+    search_end = max(len(HEADERS_SYNC_PATTERN), int(received_pm.size * 0.10))
+    h_corr, h_idx = binxcorr.correlate_sliding_bin_argmax(received_pm, HEADERS_SYNC_PATTERN, 0, search_end, False)
+    _rt_print(_RUNTIME, "[DEC] 1×correlate (sync only): ", time.time() - t, "s")
 
-    if (hdr_best_corr < corr_threshold or data_best_corr < corr_threshold or end_best_corr < corr_threshold):
-        raise ValueError(f"Sync not detected: headers={hdr_best_corr}, data={data_best_corr}, end={end_best_corr}")
+    if h_corr < corr_threshold:
+        raise ValueError(f"Sync not detected (headers): {h_corr:.3f}")
 
-    headers_start = int(hdr_best_idx)  + len(HEADERS_SYNC_PATTERN)
-    data_start    = int(data_best_idx) + len(DATA_SYNC_PATTERN)
-    data_end      = int(end_best_idx)
+    sync_start = int(h_idx)
+    sync_end   = sync_start + len(HEADERS_SYNC_PATTERN)
+
+    len_bits_total = 2 * LENGTH_BITS_PER_FIELD
+    chips_per_bit  = (LENGTH_CHIP_LENGTH if USE_PRBS_FOR_HEADERS else 3)
+    len_block_chips = len_bits_total * chips_per_bit
+
+    len_block_rx = received_pm[sync_end: sync_end + len_block_chips]
+    hdr_chips_len, data_chips_len = _decode_len_block_chips(
+        len_block_rx, USE_PRBS_FOR_HEADERS, LENGTH_CHIP_LENGTH, LENGTH_PRBS if USE_PRBS_FOR_HEADERS else None, LENGTH_BITS_PER_FIELD
+    )
+
+    headers_start = sync_end + len_block_chips
+    headers_end   = headers_start + hdr_chips_len
+    data_start    = headers_end
+    data_end      = data_start + data_chips_len
     
     if not (headers_start < data_start < data_end):
         raise ValueError(f"Invalid sync pattern order: headers_start={headers_start}, data_start={data_start}, data_end={data_end}")
     
     expected_data_bits = (data_end - data_start) * 8  # Approximate based on pixel range
     
-    protected_headers = received_pm[headers_start:data_start - len(DATA_SYNC_PATTERN)]
+    protected_headers = received_pm[headers_start:headers_end]
 
     t3 = time.time()
     if USE_PRBS_FOR_HEADERS:
@@ -254,7 +278,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
         raise ValueError(f"Invalid JPEG headers: start={decoded_headers[:2].hex()}, sos_index={sos_index}")
     
     # Despread data
-    protected_data = received_pm[data_start:data_end]
+    protected_data    = received_pm[data_start:data_end]
     if USE_MARKER_CODEWORDS:
         t = time.time()
         data_bytes = _decode_data_with_codewords_popcnt(protected_data.astype(np.int8, copy=False), _TOKENS, _CODES_PACKED, MARKER_CODEWORD_LEN, MARKER_DET_THRESH)
@@ -358,17 +382,16 @@ if __name__ == "__main__":
 
         # --- Pre-compute chip-level BER per section (independent of decode success) ---
         rx_pm = (2 * (noisy.ravel() > 127).astype(np.int8) - 1)
-        tx_pm = tx_meta["stream_pm"]; idx = tx_meta["idx"]; L_end = idx["sync_e"][1]
+        tx_pm = tx_meta["stream_pm"]; idx = tx_meta["idx"]; L_end = idx["data"][1]
         rx_pm = rx_pm[:L_end]
 
         s,e = idx["hdr"];    err_h  = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_h  = e - s; ber_h  = (err_h/tot_h) if tot_h else 0.0
         s,e = idx["data"];   err_d  = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_d  = e - s; ber_d  = (err_d/tot_d) if tot_d else 0.0
-        s,e = idx["sync_h"]; err_sh = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_sh = e - s
-        s,e = idx["sync_d"]; err_sd = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_sd = e - s
-        s,e = idx["sync_e"]; err_se = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_se = e - s
+        s,e = idx["sync"];  err_sh = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_sh = e - s
+        s,e = idx["len"];   err_sl = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_sl = e - s
 
-        err_sync = err_sh + err_sd + err_se
-        tot_sync = tot_sh + tot_sd + tot_se
+        err_sync = err_sh + err_sl
+        tot_sync = tot_sh + tot_sl
         ber_sync = (err_sync / tot_sync) if tot_sync else 0.0
 
         err_total  = err_h + err_d + err_sync

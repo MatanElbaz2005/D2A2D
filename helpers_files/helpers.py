@@ -399,3 +399,55 @@ def _decode_data_with_codewords_popcnt(chips_pm: np.ndarray, tokens: list[bytes]
                 break
 
     return bytes(out)
+
+def _int_to_bits_be(n: int, bits: int) -> np.ndarray:
+    b = np.zeros(bits, dtype=np.uint8)
+    for i in range(bits):
+        b[i] = (n >> (bits - 1 - i)) & 1
+    return b
+
+def _bits01_to_pm(bits01: np.ndarray) -> np.ndarray:
+    return bits01.astype(np.int8) * 2 - 1
+
+def _map_bits_to_chips(bits01: np.ndarray, use_prbs: bool, chip_len: int, prbs: np.ndarray) -> np.ndarray:
+    """מפה ביטים (0/1) לצ'יפים ±1 כפי שאנחנו עושים ל-headers."""
+    pm = _bits01_to_pm(bits01)
+    if use_prbs:
+        return np.repeat(pm, chip_len) * np.tile(prbs, pm.size)
+    else:
+        mapping0 = np.array([-1, 1, -1], dtype=np.int8)
+        mapping1 = np.array([ 1,-1,  1], dtype=np.int8)
+        out = np.empty(pm.size * 3, dtype=np.int8)
+        for i, v in enumerate(pm):
+            out[i*3:(i+1)*3] = mapping1 if v > 0 else mapping0
+        return out
+
+def _encode_len_block_chips(hdr_len_chips: int, data_len_chips: int,
+                            use_prbs: bool, chip_len: int, prbs: np.ndarray, LENGTH_BITS_PER_FIELD) -> np.ndarray:
+    """Build chips for length fields [hdr_len(32b), data_len(32b)] with PRBS spreading only."""
+    b_hdr = _int_to_bits_be(hdr_len_chips, LENGTH_BITS_PER_FIELD)
+    b_dat = _int_to_bits_be(data_len_chips, LENGTH_BITS_PER_FIELD)
+    bits = np.concatenate([b_hdr, b_dat], axis=0)
+    return _map_bits_to_chips(bits, use_prbs, chip_len, prbs)
+
+def _decode_len_block_chips(rx_pm: np.ndarray, use_prbs: bool, chip_len: int, prbs: np.ndarray, LENGTH_BITS_PER_FIELD) -> tuple[int,int]:
+    total_bits = 2 * LENGTH_BITS_PER_FIELD
+    if use_prbs:
+        groups = rx_pm.reshape(-1, chip_len)
+        soft = (groups @ prbs) / float(chip_len)
+    else:
+        groups = rx_pm.reshape(-1, 3)
+        patterns = np.array([[-1, 1, -1],[1,-1,1]], dtype=np.int32)
+        corr = groups @ patterns.T
+        soft = (corr[:,1] - corr[:,0]) / 3.0
+
+    bits01 = (soft > 0).astype(np.uint8)
+
+    hdr_bits = bits01[:LENGTH_BITS_PER_FIELD]
+    dat_bits = bits01[LENGTH_BITS_PER_FIELD:]
+    hdr = 0
+    for v in hdr_bits: hdr = (hdr << 1) | int(v)
+    dat = 0
+    for v in dat_bits: dat = (dat << 1) | int(v)
+    return int(hdr), int(dat)
+
