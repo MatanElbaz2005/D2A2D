@@ -222,6 +222,17 @@ std::pair<float, int64_t> correlate_sliding_bin_argmax(
             if (mismatches < best_mismatches) {
                 best_mismatches = mismatches;
                 best_pos = pos;
+                // Stage 2: stop everything if we hit a perfect match
+                if (mismatches == 0) {
+                    if (debug) {
+                        auto now = clock::now();
+                        auto ms = [](auto dt){ return std::chrono::duration_cast<std::chrono::microseconds>(dt).count()/1000.0; };
+                        std::fprintf(stderr,
+                            "[binxcorr argmax] EARLY perfect match at pos=%zu (abs=%zu); pack: %.3f ms, loop: %.3f ms\n",
+                            pos, start + pos, ms(t_pack_1 - t_pack_0), ms(now - t_loop_0));
+                    }
+                    return { 1.0f, static_cast<int64_t>(start + pos) };
+                }
             }
         }
     }
@@ -371,7 +382,8 @@ PYBIND11_MODULE(binxcorr, m) {
           py::arg("start_bit") = 0, py::arg("end_bit") = -1,
           py::arg("debug") = false,
           "Return only the best correlation and its absolute index in the signal.\n"
-          "Includes per-position early-skip after the first 64-bit word.");
+          "Per-position early-skip after the first 64-bit word; "
+          "EARLY RETURN if a perfect match is found (corr=1.0).");
 
     // Expose packer (±1 -> uint64 bitstream)
     m.def("pack_pm_bits", &pack_pm_bits_py, py::arg("pm"),
