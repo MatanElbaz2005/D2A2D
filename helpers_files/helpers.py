@@ -336,10 +336,18 @@ def _decode_data_with_codewords_fast(chips_pm: np.ndarray, tokens: list[bytes], 
 
     return bytes(out)
 
-def _decode_data_with_codewords_popcnt(chips_pm: np.ndarray, tokens: list[bytes], codes_packed: np.ndarray, L: int, thresh: float) -> bytes:
+def _decode_data_with_codewords_popcnt(
+    chips_pm: np.ndarray,
+    tokens: list[bytes],
+    codes_packed: np.ndarray,
+    L: int,
+    thresh: float,
+    return_token_positions: bool = False,
+):
     chips_pm = chips_pm.astype(np.int8, copy=False)
     N = int(chips_pm.size)
-    if N < 8: return b""
+    if N < 8:
+        return (b"", set()) if return_token_positions else b""
 
     step = 8
     n_pos = (N - L) // step + 1 if N >= L else 0
@@ -348,14 +356,14 @@ def _decode_data_with_codewords_popcnt(chips_pm: np.ndarray, tokens: list[bytes]
         strided = np.lib.stride_tricks.as_strided(
             chips_pm,
             shape=(n_pos, L),
-            strides=(chips_pm.strides[0]*step, chips_pm.strides[0])
+            strides=(chips_pm.strides[0] * step, chips_pm.strides[0]),
         )
         bits = (strided > 0).astype(np.uint8)
         win_packed = np.packbits(bits, axis=1)
 
         xor = np.bitwise_xor(win_packed[:, None, :], codes_packed[None, :, :]).astype(np.uint8)
-        dists = POPCNT8[xor].sum(axis=2) 
-        best_idx = np.argmin(dists, axis=1) 
+        dists = POPCNT8[xor].sum(axis=2)
+        best_idx = np.argmin(dists, axis=1)
         best_dist = dists[np.arange(n_pos), best_idx]
 
         d_max = int(np.floor((1.0 - thresh) * L / 2.0))
@@ -365,39 +373,45 @@ def _decode_data_with_codewords_popcnt(chips_pm: np.ndarray, tokens: list[bytes]
         best_idx = np.zeros(0, dtype=np.intp)
 
     out = bytearray()
+    token_starts = [] if return_token_positions else None
+
     pos = 0
     pos8 = 0
     while pos < N:
         if pos8 < hits.size and hits[pos8]:
             j = int(best_idx[pos8])
+            if return_token_positions:
+                token_starts.append(len(out))
             out.extend(tokens[j])
-            pos  += L
+            pos += L
             pos8 += L // 8
         else:
             if pos8 < hits.size:
                 rel = hits[pos8:]
-                nz  = np.flatnonzero(rel)
+                nz = np.flatnonzero(rel)
                 next_hit = pos8 + int(nz[0]) if nz.size else hits.size
             else:
                 next_hit = pos8
 
             run_b = max(0, next_hit - pos8)
-            run_chips = chips_pm[pos:pos + 8*run_b]
+            run_chips = chips_pm[pos:pos + 8 * run_b]
             if run_chips.size > 0:
                 b = (run_chips > 0).astype(np.uint8).reshape(-1, 8)
                 out.extend(np.packbits(b, axis=1).ravel().tolist())
-            pos  += 8*run_b
+            pos += 8 * run_b
             pos8 += run_b
 
             if pos8 >= hits.size:
                 rem = N - pos
                 tail_b = rem // 8
                 if tail_b > 0:
-                    b = (chips_pm[pos:pos + 8*tail_b] > 0).astype(np.uint8).reshape(-1, 8)
+                    b = (chips_pm[pos:pos + 8 * tail_b] > 0).astype(np.uint8).reshape(-1, 8)
                     out.extend(np.packbits(b, axis=1).ravel().tolist())
-                    pos += 8*tail_b
+                    pos += 8 * tail_b
                 break
 
+    if return_token_positions:
+        return bytes(out), set(token_starts)
     return bytes(out)
 
 def _int_to_bits_be(n: int, bits: int) -> np.ndarray:

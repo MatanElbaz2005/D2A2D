@@ -1,5 +1,5 @@
 import struct
-from typing import Tuple
+from typing import Tuple, Optional, Set
 
 def split_jpeg(data: bytes) -> Tuple[bytes, bytes]:
     """
@@ -76,21 +76,68 @@ def merge_jpeg(header: bytes, data: bytes) -> bytes:
     return header + data + b'\xff\xd9'
 
 
-def fix_false_markers(compressed: bytes) -> bytes:
+def fix_false_markers(
+    compressed: bytes,
+    use_marker_codewords: bool = False,
+    preserve_data: bool = False,
+    whitelist_rst: Optional[Set[int]] = None,
+) -> bytes:
+    """
+    Normalize entropy bytes to avoid false JPEG markers.
+
+    - If use_marker_codewords=True:
+        Only trust RST/FF00 when they appear at positions present in whitelist_rst
+        (i.e., produced by the codeword decoder). Any other 0xFFxx is neutralized.
+    - If use_marker_codewords=False:
+        Vanilla JPEG: allow FF00 and FFD0..FFD7 anywhere.
+
+    - If preserve_data=True:
+        For illegal 0xFFxx, flip the 0xFF to 0xEF (keep next byte as data).
+      Else:
+        Stuff to FF00.
+
+    Prints ONLY when a false RST (FFD0..FFD7 not whitelisted) is detected and replaced.
+    """
     ba = bytearray(compressed)
     pos = 0
-    valid_next = {0x00} | set(range(0xd0, 0xd8))
+
+    allow_rst_anywhere = (not use_marker_codewords)
+    rst_set = set(range(0xD0, 0xD8))
+
     while True:
-        pos = ba.find(255, pos)
+        pos = ba.find(0xFF, pos)
         if pos == -1 or pos >= len(ba) - 1:
             break
-        next_byte = ba[pos + 1]
-        if next_byte in valid_next:
+
+        nb = ba[pos + 1]
+
+        # Always allow stuffed FF00
+        if nb == 0x00:
             pos += 2
             continue
-        else:
-            ba[pos + 1] = 0x00
+
+        # Determine if this is a false RST (RST present but not allowed/whitelisted)
+        is_false_rst = (
+            nb in rst_set and
+            (not allow_rst_anywhere) and
+            (whitelist_rst is None or pos not in whitelist_rst)
+        )
+
+        # RST handling (allowed ones pass through)
+        if nb in rst_set and not is_false_rst:
             pos += 2
+            continue
+
+        # Any other FFxx (and false RST when not whitelisted) → neutralize
+        if preserve_data:
+            # Change 0xFF -> 0xEF to keep next byte as data
+            ba[pos] = 0xEF
+        else:
+            # Stuff to FF00
+            ba[pos + 1] = 0x00
+
+        pos += 2
+
     return bytes(ba)
 
 # def encode_udp_to_frame(headers: bytes, data: bytes) -> np.ndarray:

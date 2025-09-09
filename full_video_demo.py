@@ -21,7 +21,7 @@ FRAME_HEIGHT = 480  # NTSC
 
 # Reed-Solomon config
 USE_RS_FOR_HEADERS = True
-USE_RS_FOR_DATA = True
+USE_RS_FOR_DATA = False
 ECC_SYMBOLS = 50
 CHUNK_BYTES = 150
 
@@ -281,7 +281,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     protected_data    = received_pm[data_start:data_end]
     if USE_MARKER_CODEWORDS:
         t = time.time()
-        data_bytes = _decode_data_with_codewords_popcnt(protected_data.astype(np.int8, copy=False), _TOKENS, _CODES_PACKED, MARKER_CODEWORD_LEN, MARKER_DET_THRESH)
+        data_bytes, token_starts = _decode_data_with_codewords_popcnt(protected_data.astype(np.int8, copy=False), _TOKENS, _CODES_PACKED, MARKER_CODEWORD_LEN, MARKER_DET_THRESH, return_token_positions=True)
         _rt_print(_RUNTIME, "[DEC] Marker codewords decode took: ", time.time() - t)
     else:
         t = time.time()
@@ -323,7 +323,20 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
         decoded_data = data_bytes
     
     t = time.time()
-    fixed_data = fix_false_markers(decoded_data)
+    if USE_RS_FOR_DATA:
+        fixed_data = fix_false_markers(
+            decoded_data,
+            use_marker_codewords=False,
+            preserve_data=False,
+            whitelist_rst=None
+        )
+    else:
+        fixed_data = fix_false_markers(
+            decoded_data,
+            use_marker_codewords=USE_MARKER_CODEWORDS,
+            preserve_data=True,
+            whitelist_rst=token_starts
+        )
     _rt_print(_RUNTIME, "[DEC] fix_false_markers took: ", time.time() - t)
 
     t7 = time.time()
