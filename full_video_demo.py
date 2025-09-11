@@ -380,7 +380,7 @@ if __name__ == "__main__":
         print(f"Original: {w}×{h}")
         
         t = time.time()
-        frame_proc = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
+        frame_proc = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT), interpolation=cv2.INTER_NEAREST)
         _rt_print(_RUNTIME, "[LOOP] resize: ", time.time()-t, " s")
         encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 70, cv2.IMWRITE_JPEG_RST_INTERVAL, 10]
         t = time.time()
