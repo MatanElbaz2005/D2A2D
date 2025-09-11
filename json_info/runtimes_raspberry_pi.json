@@ -804,6 +804,7 @@
     {
       "timestamp": "2025-09-11 13:07:53",
       "os": "raspberry_pi",
+      "whats new?": "more prints in the Encode section",
       "frames_used": [
         2,
         3,
