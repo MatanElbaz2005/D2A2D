@@ -198,7 +198,6 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
         full_u8 = np.pad(full_u8, (0, total_pixels - full_u8.size), mode='constant')
     frame = full_u8.reshape((FRAME_HEIGHT, FRAME_WIDTH))
 
-    _rt_print(_RUNTIME, "[ENC] took: ", time.time() - start_time, " sec")
     return frame, tx_meta
 
 def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes:
@@ -342,7 +341,6 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     t7 = time.time()
     result = merge_jpeg(decoded_headers, fixed_data)
     _rt_print(_RUNTIME, "[DEC] merge_jpeg took: ", time.time() - t7)
-    _rt_print(_RUNTIME, "Total decode time: ", time.time() - t0, " sec")
     return result
 
 if __name__ == "__main__":
@@ -363,37 +361,54 @@ if __name__ == "__main__":
         frame_count += 1
         _rt_set_frame(frame_count, _RUNTIME)
         frame_start = time.time()
+        t = time.time()
         success, frame = cap.read()
+        _rt_print(_RUNTIME, "[LOOP] cap.read: ", time.time()-t, " s")
         if not success:
             break
         h, w = frame.shape[:2]
         print(f"Original: {w}×{h}")
         
+        t = time.time()
         frame_proc = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
+        _rt_print(_RUNTIME, "[LOOP] resize: ", time.time()-t, " s")
         encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 70, cv2.IMWRITE_JPEG_RST_INTERVAL, 10]
+        t = time.time()
         _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
+        _rt_print(_RUNTIME, "[LOOP] imencode: ", time.time()-t, " s")
+        t = time.time()
         headers, compressed = split_jpeg(encoded_image.tobytes())
+        _rt_print(_RUNTIME, "[LOOP] split_jpeg: ", time.time()-t, " s")
         
         # encode
+        t = time.time()
         frame, tx_meta = encode_udp_to_frame(headers, compressed)
+        _rt_print(_RUNTIME, "[ENC] encode_udp_to_frame (outer): ", time.time()-t, " s")
         
         # save the encoded frame
         # cv2.imwrite(f"encoded_{frame_count}.png", frame)
         # print(f"Encoded frame {frame_count} saved.")
 
         # read from slider
+        t = time.time()
         sigma = float(cv2.getTrackbarPos('Noise', 'Monitor'))
+        _rt_print(_RUNTIME, "[GUI] read slider: ", time.time()-t, " s")
         
         # add noise
+        t = time.time()
         noisy = frame.astype(np.float32) + np.random.normal(0.0, sigma, frame.shape).astype(np.float32)
         noisy = np.clip(noisy, 0, 255).astype(np.uint8)
+        _rt_print(_RUNTIME, "[LOOP] add noise (chips): ", time.time()-t, " s")
 
         # analog video (for the GUI)
+        t = time.time()
         analog_src = frame_proc
         analog_noisy = analog_src.astype(np.float32) + np.random.normal(0.0, sigma, analog_src.shape).astype(np.float32)
         analog_noisy = np.clip(analog_noisy, 0, 255).astype(np.uint8)
+        _rt_print(_RUNTIME, "[GUI] add noise (analog): ", time.time()-t, " s")
 
-        # --- Pre-compute chip-level BER per section (independent of decode success) ---
+        t = time.time()
+        # --- Pre-compute chip-level BER per section ---
         rx_pm = (2 * (noisy.ravel() > 127).astype(np.int8) - 1)
         tx_pm = tx_meta["stream_pm"]; idx = tx_meta["idx"]; L_end = idx["data"][1]
         rx_pm = rx_pm[:L_end]
@@ -410,15 +425,20 @@ if __name__ == "__main__":
         err_total  = err_h + err_d + err_sync
         bits_total = tot_h + tot_d + tot_sync
         ber_total  = (err_total / bits_total) if bits_total else 0.0
+        _rt_print(_RUNTIME, "[LOOP] compute BER: ", time.time()-t, " s")
 
         line1 = f"BER stream: {100.0*ber_total:.2f}%  ({err_total}/{bits_total} chips)"
         line2 = f"H: {100.0*ber_h:.2f}%  D: {100.0*ber_d:.2f}%  Sync: {100.0*ber_sync:.2f}%"
 
         try:
             # decode
+            t = time.time()
             decoded_data = decode_frame_to_udp(noisy)
+            _rt_print(_RUNTIME, "[DEC] decode_frame_to_udp (outer): ", time.time()-t, " s")
+            t = time.time()
             decoded_np = np.frombuffer(decoded_data, dtype=np.uint8)
             decoded_img = cv2.imdecode(decoded_np, cv2.IMREAD_COLOR)
+            _rt_print(_RUNTIME, "[GUI] imdecode recovered: ", time.time()-t, " s")
             if decoded_img is None:
                 # show black recovered frame
                 frame_to_show = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
@@ -461,13 +481,21 @@ if __name__ == "__main__":
             cv2.putText(annotated, line2, (x2, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
             frame_to_show = annotated
 
+        t = time.time()
         orig_vis = _label(_to_bgr(frame_proc), 'Original')
         analog_vis = _label(_to_bgr(analog_noisy), 'Analog')
         enc_vis   = _label(_to_bgr(noisy), 'Encoded+Noise')
         rec_vis   = _label(_to_bgr(frame_to_show), 'Recovered')
+        _rt_print(_RUNTIME, "[GUI] build labels: ", time.time()-t, " s")
 
+        t = time.time()
         mosaic = _compose_grid(orig_vis, analog_vis, enc_vis, rec_vis, gap=20)
+        _rt_print(_RUNTIME, "[GUI] compose mosaic: ", time.time()-t, " s")
+
+        t = time.time()
         cv2.imshow('Monitor', mosaic)
+        _rt_print(_RUNTIME, "[GUI] imshow: ", time.time()-t, " s")
+        _rt_print(_RUNTIME, "[LOOP] frame total: ", time.time()-frame_start, " s")
         _rt_flush_if_ready(_RUNTIME, OS)
         delay_ms = max(1, int(1000.0 / fps - (time.time() - frame_start) * 1000.0))
         if cv2.waitKey(delay_ms) & 0xFF == ord('q'):

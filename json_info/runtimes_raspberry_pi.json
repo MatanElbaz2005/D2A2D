@@ -660,6 +660,146 @@
         "[DEC] merge_jpeg took:": "0.00011920928955078125 ms (0.90909090909090910000 %)",
         "Total decode time:": "-94.24740076065063000000 ms (-76.40137649255317000000 %)"
       }
+    },
+    {
+      "timestamp": "2025-09-11 11:32:55",
+      "os": "raspberry_pi",
+      "whats new?": "added new prints",
+      "frames_used": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "averages_ms": {
+        "[LOOP] cap.read:": 2.1860599517822266,
+        "[LOOP] resize:": 4.749536514282227,
+        "[LOOP] imencode:": 2.244889736175537,
+        "[LOOP] split_jpeg:": 1.6251802444458008,
+        "[ENC] rs encode for headers took": 0.14609098434448242,
+        "[ENC] PRBS/map headers:": 0.4000663757324219,
+        "[ENC] Marker codewords encode:": 2.319216728210449,
+        "[ENC] Concat full stream:": 0.2936124801635742,
+        "[ENC] Full stream length:": 172369000.0,
+        "[ENC] took:": 4.194498062133789,
+        "[ENC] encode_udp_to_frame (outer):": 4.290938377380371,
+        "[GUI] read slider:": 0.03135204315185547,
+        "[LOOP] add noise (chips):": 17.205476760864258,
+        "[GUI] add noise (analog):": 52.098095417022705,
+        "[LOOP] compute BER:": 0.7924437522888184,
+        "[DEC] Threshold->±1 took:": 0.5146265029907227,
+        "[DEC] 1×correlate (sync only):": 0.993967056274414,
+        "[DEC] PRBS/map headers took:": 0.2586245536804199,
+        "[DEC] packbits headers took:": 0.02765655517578125,
+        "[DEC] rs decode for headers time": 1.9161105155944824,
+        "[DEC] Marker codewords decode took:": 24.01822805404663,
+        "[DEC] fix_false_markers took:": 0.12952089309692383,
+        "[DEC] merge_jpeg took:": 0.013530254364013672,
+        "Total decode time:": 28.514325618743896,
+        "[DEC] decode_frame_to_udp (outer):": 28.569340705871582,
+        "[GUI] imdecode recovered:": 2.5936365127563477,
+        "[GUI] build labels:": 3.3226609230041504,
+        "[GUI] compose mosaic:": 3.6888718605041504,
+        "[GUI] imshow:": 10.73545217514038,
+        "[LOOP] frame total:": 138.0518674850464
+      },
+      "highlights_block": [
+        "--------------------------------",
+        "[ENC] took: 4.194498062133789 ms",
+        "--------------------------------",
+        "--------------------------------",
+        "Total decode time: 28.514325618743896 ms",
+        "--------------------------------"
+      ],
+      "improvements_vs_prev": {
+        "[ENC] rs encode for headers took": "0.01406669616699218800 ms (10.65462753950338600000 %)",
+        "[ENC] PRBS/map headers:": "-0.02676248550415039000 ms (-6.27007401200949500000 %)",
+        "[ENC] Marker codewords encode:": "0.11062622070312500000 ms (5.00890592108814100000 %)",
+        "[ENC] Concat full stream:": "0.01472234725952148400 ms (5.27890574909168600000 %)",
+        "[ENC] Full stream length:": "-484000.00000000000000000000 ms (-0.28000671090464150000 %)",
+        "[ENC] took:": "0.02312660217285156200 ms (0.55441243712848650000 %)",
+        "[DEC] Threshold->±1 took:": "0.08928775787353516000 ms (20.99215246636771300000 %)",
+        "[DEC] 1×correlate (sync only):": "0.02610683441162098300 ms (2.69737652420247630000 %)",
+        "[DEC] PRBS/map headers took:": "-0.21779537200927734000 ms (-45.71500062554735400000 %)",
+        "[DEC] packbits headers took:": "0.00131130218505859380 ms (4.97737556561086000000 %)",
+        "[DEC] rs decode for headers time": "0.13303756713867188000 ms (7.46113989637305600000 %)",
+        "[DEC] Marker codewords decode took:": "-0.52881240844726560000 ms (-2.15428173206970800000 %)",
+        "[DEC] fix_false_markers took:": "0.01096725463867187500 ms (9.25087983911513400000 %)",
+        "[DEC] merge_jpeg took:": "0.00029802322387695310 ms (2.25225225225225230000 %)",
+        "Total decode time:": "-0.59652328491210940000 ms (-2.04914424476708620000 %)"
+      }
+    },
+    {
+      "timestamp": "2025-09-11 12:35:55",
+      "os": "raspberry_pi",
+      "whats new?": "new desine for the json file",
+      "frames_used": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "sections": {
+        "GUI": {
+          "[GUI] read slider:": 0.0368952751159668,
+          "[GUI] add noise (analog):": 53.4670352935791,
+          "[GUI] imdecode recovered:": 2.9449462890625,
+          "[GUI] build labels:": 3.8663148880004883,
+          "[GUI] compose mosaic:": 4.435360431671143,
+          "[GUI] imshow:": 3.0115842819213867
+        },
+        "ENC": {
+          "[ENC] rs encode for headers took": 0.16134977340698242,
+          "[ENC] PRBS/map headers:": 0.46074390411376953,
+          "[ENC] Marker codewords encode:": 2.453327178955078,
+          "[ENC] Concat full stream:": 0.3603696823120117,
+          "[ENC] Full stream length:": 161367000.0,
+          "[ENC] encode_udp_to_frame (outer):": 6.193935871124268
+        },
+        "DEC": {
+          "[DEC] Threshold->±1 took:": 0.5669593811035156,
+          "[DEC] 1×correlate (sync only):": 1.1821389198303223,
+          "[DEC] PRBS/map headers took:": 0.32401084899902344,
+          "[DEC] packbits headers took:": 0.04100799560546875,
+          "[DEC] rs decode for headers time": 2.2678375244140625,
+          "[DEC] Marker codewords decode took:": 24.604082107543945,
+          "[DEC] fix_false_markers took:": 0.11152029037475586,
+          "[DEC] merge_jpeg took:": 0.013768672943115234,
+          "[DEC] decode_frame_to_udp (outer):": 30.45445680618286
+        },
+        "LOOP": {
+          "[LOOP] cap.read:": 2.381622791290283,
+          "[LOOP] resize:": 6.007730960845947,
+          "[LOOP] imencode:": 2.4303793907165527,
+          "[LOOP] split_jpeg:": 1.5552639961242676,
+          "[LOOP] add noise (chips):": 22.31699228286743,
+          "[LOOP] compute BER:": 0.8403658866882324,
+          "[LOOP] frame total:": 145.7052230834961
+        },
+        "OTHER": {}
+      },
+      "section_totals_ms": {
+        "GUI": 67.76213645935059,
+        "ENC": 6.193935871124268,
+        "DEC": 30.45445680618286,
+        "LOOP": 35.532355308532715,
+        "OTHER": 0.0
+      },
+      "highlights_block": [
+        "--------------------------------",
+        "[ENC] encode_udp_to_frame (outer): 6.193935871124268 ms",
+        "--------------------------------",
+        "--------------------------------",
+        "[DEC] decode_frame_to_udp (outer): 30.45445680618286 ms",
+        "--------------------------------"
+      ],
+      "improvements_vs_prev": {
+        "GUI": {},
+        "ENC": {},
+        "DEC": {},
+        "LOOP": {},
+        "OTHER": {}
+      }
     }
   ]
 }

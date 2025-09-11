@@ -35,9 +35,9 @@ def _rt_set_frame(idx: int, _RUNTIME):
     _RUNTIME["frame"] = idx
 
 def _rt_record(label: str, seconds: float, _RUNTIME):
-    if not _RUNTIME["enabled"]:
+    if not _RUNTIME.get("enabled"):
         return
-    if 2 <= _RUNTIME["frame"] <= 5:
+    if 2 <= _RUNTIME.get("frame", 0) <= 5:
         try:
             v = float(seconds)
         except (TypeError, ValueError):
@@ -58,13 +58,27 @@ def _rt_flush_if_ready(_RUNTIME, OS):
     if _RUNTIME.get("frame", 0) < 5:
         return
 
-    HIGHLIGHT_KEYS = ("[ENC] took:", "Total decode time:")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    frame_idxs = [2, 3, 4, 5]
+
+    fn = _RUNTIME["filename"]
+    root = None
+    if os.path.exists(fn):
+        try:
+            with open(fn, "r", encoding="utf-8") as f:
+                root = json.load(f)
+        except Exception:
+            root = None
+    if root is None:
+        root = {"os": OS, "runs": []}
+    prev_run = root["runs"][-1] if root["runs"] else None
+
+    HIGHLIGHT_KEYS = ("[ENC] encode_udp_to_frame (outer):", "[DEC] decode_frame_to_udp (outer):")
 
     averages_sec = {
         k: (sum(v) / len(v) if v else None)
         for k, v in _RUNTIME["collected"].items()
     }
-
     averages_ms = {}
     for k, v in averages_sec.items():
         if v is None or not math.isfinite(v):
@@ -75,59 +89,86 @@ def _rt_flush_if_ready(_RUNTIME, OS):
             except (InvalidOperation, ValueError):
                 averages_ms[k] = None
 
+    def _bucket_of(key: str) -> str:
+        if key.startswith("[GUI]"):  return "GUI"
+        if key.startswith("[ENC]"):  return "ENC"
+        if key.startswith("[DEC]"):  return "DEC"
+        if key.startswith("[LOOP]"): return "LOOP"
+        return "OTHER"
+
+    sections = {"GUI": {}, "ENC": {}, "DEC": {}, "LOOP": {}, "OTHER": {}}
+    for k, ms in averages_ms.items():
+        bucket = _bucket_of(k)
+        sections[bucket][k] = ms
+
+    def _sum_valid(d: dict[str, float | None], exclude: set[str] | None = None) -> float:
+        total = 0.0
+        if not d:
+            return 0.0
+        exclude = exclude or set()
+        for k, v in d.items():
+            if k in exclude:
+                continue
+            if isinstance(v, (int, float)) and math.isfinite(v):
+                total += float(v)
+        return total
+
+    ENC_OUTER_KEY = "[ENC] encode_udp_to_frame (outer):"
+    DEC_OUTER_KEY = "[DEC] decode_frame_to_udp (outer):"
+    LOOP_EXCLUDE = {"[LOOP] frame total:"}
+
+    section_totals_ms = {
+        "GUI": _sum_valid(sections.get("GUI", {})),
+        "ENC": float(sections.get("ENC", {}).get(ENC_OUTER_KEY, 0.0) or 0.0),
+        "DEC": float(sections.get("DEC", {}).get(DEC_OUTER_KEY, 0.0) or 0.0),
+        "LOOP": _sum_valid(sections.get("LOOP", {}), exclude=LOOP_EXCLUDE),
+        "OTHER": _sum_valid(sections.get("OTHER", {})),
+    }
+
     highlights_block = []
     for key in HIGHLIGHT_KEYS:
-        val = averages_ms.get(key)
-        if val is not None and math.isfinite(val):
+        sect = "ENC" if key.startswith("[ENC]") else "DEC"
+        val = sections.get(sect, {}).get(key)
+        if isinstance(val, (int, float)) and math.isfinite(val):
             highlights_block.append("--------------------------------")
             highlights_block.append(f"{key} {val} ms")
             highlights_block.append("--------------------------------")
 
+    def _format_delta(cur: float | None, prev: float | None) -> str | None:
+        if cur is None or prev is None or not (isinstance(cur, (int, float)) and isinstance(prev, (int, float))):
+            return None
+        if not (math.isfinite(cur) and math.isfinite(prev)) or prev == 0:
+            return f"{cur - prev:.8f} ms (n/a)"
+        diff = cur - prev
+        pct = (diff / prev) * 100.0
+        return f"{diff:.8f} ms ({pct:.8f} %)"
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    improvements_vs_prev = None
+    if prev_run is not None and isinstance(prev_run, dict):
+        improvements_vs_prev = {"GUI": {}, "ENC": {}, "DEC": {}, "LOOP": {}, "OTHER": {}}
+        prev_sections = prev_run.get("sections", {})
+        for bucket in improvements_vs_prev.keys():
+            cur_map = sections.get(bucket, {})
+            prev_map = prev_sections.get(bucket, {})
+            out_map = {}
+            for k, cur_val in cur_map.items():
+                prev_val = prev_map.get(k)
+                delta_str = _format_delta(cur_val, prev_val)
+                if delta_str is not None:
+                    out_map[k] = delta_str
+            improvements_vs_prev[bucket] = out_map
 
     run_record = {
         "timestamp": now,
         "os": OS,
-        "frames_used": [2, 3, 4, 5],
-        "averages_ms": averages_ms,
+        "frames_used": frame_idxs,
+        "sections": sections,
+        "section_totals_ms": section_totals_ms,
         "highlights_block": highlights_block,
-        "improvements_vs_prev": None
-
+        "improvements_vs_prev": improvements_vs_prev
     }
 
-    fn = _RUNTIME["filename"]
-
-    root = None
-    if os.path.exists(fn):
-        try:
-            with open(fn, "r", encoding="utf-8") as f:
-                root = json.load(f)
-        except Exception:
-            root = None
-
-    if root is None:
-        root = {"os": OS, "runs": []}
-
-    prev_run = root["runs"][-1] if root["runs"] else None
-    if prev_run:
-        prev_avg = prev_run.get("averages_ms", {})
-        improvements = {}
-        for k, cur in averages_ms.items():
-            pv = prev_avg.get(k)
-            if cur is None or pv is None:
-                continue
-            if pv > 0 and math.isfinite(pv) and math.isfinite(cur):
-                diff = cur - pv
-                pct = (diff / pv) * 100.0
-                diff_str = _truncate_decimal_str(Decimal(str(diff)))
-                pct_str = _truncate_decimal_str(Decimal(str(pct)))
-                improvements[k] = f"{diff_str} ms ({pct_str} %)"
-        if improvements:
-            run_record["improvements_vs_prev"] = improvements
-
     root["runs"].append(run_record)
-
     with open(fn, "w", encoding="utf-8") as f:
         json.dump(root, f, ensure_ascii=False, indent=2)
 
