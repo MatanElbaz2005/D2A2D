@@ -110,7 +110,7 @@ DATA_PRBS = generate_prbs(CHIP_LENGTH_FOR_DATA, DATA_PRBS_POLY, 3) if USE_PRBS_F
 if USE_PRBS_FOR_DATA: _rt_print(_RUNTIME, "[ENC] generate PRBS data took: ", time.time() - prbs_data_time)
 
 def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
-    start_time = time.time()
+    t_outer0 = time.time()
     
     if USE_RS_FOR_HEADERS:
         start_rs_headers_encode = time.time()
@@ -122,6 +122,7 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
     t = time.time()
     header_bits = np.unpackbits(np.frombuffer(coded_headers, dtype=np.uint8))
     header_bits_pm = header_bits.astype(np.int8) * 2 - 1
+    _rt_print(_RUNTIME, "[ENC] headers unpack->pm:", time.time() - t)
 
     if USE_PRBS_FOR_HEADERS:
         repeated_bits = np.repeat(header_bits_pm, CHIP_LENGTH_FOR_HEADERS)
@@ -152,6 +153,9 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
         t = time.time()
         data_bits = np.unpackbits(np.frombuffer(coded_data, dtype=np.uint8))
         data_bits_pm = data_bits.astype(np.int8) * 2 - 1
+        _rt_print(_RUNTIME, "[ENC] data unpack->pm:", time.time() - t, "s")
+
+        t = time.time()
         if USE_PRBS_FOR_DATA:
             repeated_data_bits = np.repeat(data_bits_pm, CHIP_LENGTH_FOR_DATA)
             tiled_prbs = np.tile(DATA_PRBS, len(data_bits))
@@ -169,9 +173,12 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
         prbs=LENGTH_PRBS if USE_PRBS_FOR_HEADERS else None,
         LENGTH_BITS_PER_FIELD=LENGTH_BITS_PER_FIELD
     )
+    _rt_print(_RUNTIME, "[ENC] build length block:", time.time() - t, " s")
+    t = time.time()
     full_stream = np.concatenate((HEADERS_SYNC_PATTERN, len_block_pm, protected_headers, protected_data))
     _rt_print(_RUNTIME, "[ENC] Concat full stream: ", time.time()-t, "s len=", len(full_stream))
 
+    t = time.time()
     s0 = 0
     s1 = s0 + len(HEADERS_SYNC_PATTERN)
     s2 = s1 + len(len_block_pm)
@@ -187,8 +194,10 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
             "data": (s3, s4),
         }
     }
+    _rt_print(_RUNTIME, "[ENC] build tx_meta:", time.time() - t, " s")
     _rt_print(_RUNTIME, "[ENC] Full stream length: ", len(full_stream), " bits")
 
+    t = time.time()
     total_pixels = FRAME_WIDTH * FRAME_HEIGHT
     if len(full_stream) > total_pixels:
         raise ValueError(f"Data too large: {len(full_stream)} bits > {total_pixels} pixels")
@@ -197,6 +206,7 @@ def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
     if full_u8.size < total_pixels:
         full_u8 = np.pad(full_u8, (0, total_pixels - full_u8.size), mode='constant')
     frame = full_u8.reshape((FRAME_HEIGHT, FRAME_WIDTH))
+    _rt_print(_RUNTIME, "[ENC] pack/pad/reshape frame:", time.time() - t, " s")
 
     return frame, tx_meta
 

@@ -800,6 +800,113 @@
         "LOOP": {},
         "OTHER": {}
       }
+    },
+    {
+      "timestamp": "2025-09-11 13:07:53",
+      "os": "raspberry_pi",
+      "frames_used": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "sections": {
+        "GUI": {
+          "[GUI] read slider:": 0.033795833587646484,
+          "[GUI] add noise (analog):": 51.06830596923828,
+          "[GUI] imdecode recovered:": 2.771615982055664,
+          "[GUI] build labels:": 3.8370490074157715,
+          "[GUI] compose mosaic:": 4.158437252044678,
+          "[GUI] imshow:": 19.44553852081299
+        },
+        "ENC": {
+          "[ENC] rs encode for headers took": 0.13148784637451172,
+          "[ENC] headers unpack->pm:": 0.14835596084594727,
+          "[ENC] PRBS/map headers:": 0.46247243881225586,
+          "[ENC] Marker codewords encode:": 2.3789405822753906,
+          "[ENC] build length block:": 0.17154216766357422,
+          "[ENC] Concat full stream:": 0.07772445678710938,
+          "[ENC] build tx_meta:": 0.07706880569458008,
+          "[ENC] Full stream length:": 160955000.0,
+          "[ENC] pack/pad/reshape frame:": 0.5943179130554199,
+          "[ENC] encode_udp_to_frame (outer):": 4.221737384796143
+        },
+        "DEC": {
+          "[DEC] Threshold->±1 took:": 0.4258155822753906,
+          "[DEC] 1×correlate (sync only):": 0.9400248527526855,
+          "[DEC] PRBS/map headers took:": 0.23615360260009766,
+          "[DEC] packbits headers took:": 0.022470951080322266,
+          "[DEC] rs decode for headers time": 1.7090439796447754,
+          "[DEC] Marker codewords decode took:": 23.596882820129395,
+          "[DEC] fix_false_markers took:": 0.13273954391479492,
+          "[DEC] merge_jpeg took:": 0.011026859283447266,
+          "[DEC] decode_frame_to_udp (outer):": 27.647852897644043
+        },
+        "LOOP": {
+          "[LOOP] cap.read:": 2.1010637283325195,
+          "[LOOP] resize:": 4.685640335083008,
+          "[LOOP] imencode:": 2.19649076461792,
+          "[LOOP] split_jpeg:": 1.4780759811401367,
+          "[LOOP] add noise (chips):": 17.118394374847412,
+          "[LOOP] compute BER:": 0.7017850875854492,
+          "[LOOP] frame total:": 145.13564109802246
+        },
+        "OTHER": {}
+      },
+      "section_totals_ms": {
+        "GUI": 81.31474256515503,
+        "ENC": 4.221737384796143,
+        "DEC": 27.647852897644043,
+        "LOOP": 28.281450271606445,
+        "OTHER": 0.0
+      },
+      "highlights_block": [
+        "--------------------------------",
+        "[ENC] encode_udp_to_frame (outer): 4.221737384796143 ms",
+        "--------------------------------",
+        "--------------------------------",
+        "[DEC] decode_frame_to_udp (outer): 27.647852897644043 ms",
+        "--------------------------------"
+      ],
+      "improvements_vs_prev": {
+        "GUI": {
+          "[GUI] read slider:": "-0.00309944 ms (-8.40064620 %)",
+          "[GUI] add noise (analog):": "-2.39872932 ms (-4.48637055 %)",
+          "[GUI] imdecode recovered:": "-0.17333031 ms (-5.88568653 %)",
+          "[GUI] build labels:": "-0.02926588 ms (-0.75694509 %)",
+          "[GUI] compose mosaic:": "-0.27692318 ms (-6.24353272 %)",
+          "[GUI] imshow:": "16.43395424 ms (545.69132724 %)"
+        },
+        "ENC": {
+          "[ENC] rs encode for headers took": "-0.02986193 ms (-18.50757296 %)",
+          "[ENC] PRBS/map headers:": "0.00172853 ms (0.37516171 %)",
+          "[ENC] Marker codewords encode:": "-0.07438660 ms (-3.03206997 %)",
+          "[ENC] Concat full stream:": "-0.28264523 ms (-78.43202117 %)",
+          "[ENC] Full stream length:": "-412000.00000000 ms (-0.25531862 %)",
+          "[ENC] encode_udp_to_frame (outer):": "-1.97219849 ms (-31.84079602 %)"
+        },
+        "DEC": {
+          "[DEC] Threshold->±1 took:": "-0.14114380 ms (-24.89486964 %)",
+          "[DEC] 1×correlate (sync only):": "-0.24211407 ms (-20.48101649 %)",
+          "[DEC] PRBS/map headers took:": "-0.08785725 ms (-27.11552612 %)",
+          "[DEC] packbits headers took:": "-0.01853704 ms (-45.20348837 %)",
+          "[DEC] rs decode for headers time": "-0.55879354 ms (-24.63992851 %)",
+          "[DEC] Marker codewords decode took:": "-1.00719929 ms (-4.09362675 %)",
+          "[DEC] fix_false_markers took:": "0.02121925 ms (19.02725815 %)",
+          "[DEC] merge_jpeg took:": "-0.00274181 ms (-19.91341991 %)",
+          "[DEC] decode_frame_to_udp (outer):": "-2.80660391 ms (-9.21574115 %)"
+        },
+        "LOOP": {
+          "[LOOP] cap.read:": "-0.28055906 ms (-11.78016368 %)",
+          "[LOOP] resize:": "-1.32209063 ms (-22.00648855 %)",
+          "[LOOP] imencode:": "-0.23388863 ms (-9.62354384 %)",
+          "[LOOP] split_jpeg:": "-0.07718801 ms (-4.96301690 %)",
+          "[LOOP] add noise (chips):": "-5.19859791 ms (-23.29434828 %)",
+          "[LOOP] compute BER:": "-0.13858080 ms (-16.49053124 %)",
+          "[LOOP] frame total:": "-0.56958199 ms (-0.39091391 %)"
+        },
+        "OTHER": {}
+      }
     }
   ]
 }
