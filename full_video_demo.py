@@ -327,7 +327,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
         fixed_data = fix_false_markers(
             decoded_data,
             use_marker_codewords=False,
-            preserve_data=False,
+            preserve_data=True,
             whitelist_rst=None
         )
     else:
