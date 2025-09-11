@@ -31,8 +31,8 @@ JPEG_QUALITY = 70
 JPEG_RST_INTERVAL = 10
 WINDOW_TITLE = "Fix-Strategy Eval (Original | FF00 | EFxx)"
 
-OUT_CSV  = Path("fix_eval_results.csv")
-OUT_JSON = Path("fix_eval_summary.json")
+OUT_CSV  = Path("json_info/fix_eval_results.csv")
+OUT_JSON = Path("json_info/fix_eval_summary.json")
 
 
 def _resize_if_needed(img: np.ndarray) -> np.ndarray:

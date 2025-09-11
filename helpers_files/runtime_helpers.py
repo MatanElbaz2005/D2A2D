@@ -24,8 +24,12 @@ def _rt_init(save_runtime, _RUNTIME, OS):
     _R["collected"] = {}
     _R["flushed"] = False
     suffix = "windows" if OS.lower() == "windows" else "raspberry_pi"
-    _R["filename"] = f"runtimes_{suffix}.json"
-    _R["legacy_fn"] = f"runtimes_{suffix}.jsonl"
+    project_root = os.path.dirname(os.path.dirname(__file__))
+    base_dir = os.path.join(project_root, "json_info")
+    os.makedirs(base_dir, exist_ok=True)
+
+    _R["filename"] = os.path.join(base_dir, f"runtimes_{suffix}.json")
+    _R["legacy_fn"] = os.path.join(base_dir, f"runtimes_{suffix}.jsonl")
 
 def _rt_set_frame(idx: int, _RUNTIME):
     _RUNTIME["frame"] = idx
