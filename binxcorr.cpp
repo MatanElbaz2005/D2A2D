@@ -363,6 +363,173 @@ py::array_t<float> correlate_sliding_bin_packed(
     return out;
 }
 
+// --- NEW: fast codeword decoder (L=64 optimized), builds output bytes & token starts ---
+py::object decode_codewords_popcnt64(
+    py::array_t<int8_t,  py::array::c_style | py::array::forcecast> chips_pm,  // ±1
+    py::list tokens,                                                           // list[bytes], size K
+    py::array_t<uint8_t, py::array::c_style | py::array::forcecast> codes_packed, // K x (L/8), packbits (big-endian bits-in-byte)
+    int L,
+    double thresh,
+    bool return_token_positions
+) {
+    using clock = std::chrono::high_resolution_clock;
+
+    // --- Access inputs ---
+    auto s_buf = chips_pm.request();
+    const int8_t* s_ptr = static_cast<int8_t*>(s_buf.ptr);
+    const size_t  N     = static_cast<size_t>(s_buf.size);
+    if (N < 8 || L <= 0) {
+        if (return_token_positions) {
+            return py::make_tuple(py::bytes(""), py::array_t<int64_t>(0));
+        } else {
+            return py::bytes("");
+        }
+    }
+    auto cp_buf = codes_packed.request();
+    if (cp_buf.ndim != 2) {
+        throw std::runtime_error("codes_packed must be 2D: [K, L/8]");
+    }
+    const int K = static_cast<int>(cp_buf.shape[0]);
+    const int B = static_cast<int>(cp_buf.shape[1]); // bytes per codeword
+    if (B*8 < L) {
+        throw std::runtime_error("codes_packed has insufficient bytes for L bits");
+    }
+    if (static_cast<int>(tokens.size()) != K) {
+        throw std::runtime_error("tokens length must match codes_packed.shape[0]");
+    }
+
+    const uint8_t* cp_ptr = static_cast<uint8_t*>(cp_buf.ptr);
+
+    // --- Build 64-bit codewords (assumes L<=64); interpret packbits(big-endian) correctly ---
+    std::vector<uint64_t> codes64(K, 0ULL);
+    for (int k = 0; k < K; ++k) {
+        const uint8_t* row = cp_ptr + k * B;
+        uint64_t w = 0ULL;
+        int bit_written = 0;
+        for (int bi = 0; bi < B && bit_written < L; ++bi) {
+            uint8_t byte = row[bi];
+            // big-endian inside the byte: bit7 -> earliest bit
+            for (int b = 7; b >= 0 && bit_written < L; --b) {
+                int bit = (byte >> b) & 1;
+                if (bit) {
+                    w |= (1ULL << bit_written);
+                }
+                ++bit_written;
+            }
+        }
+        codes64[k] = w;
+    }
+
+    // --- Pack chips_pm to uint64 words (LSB=earliest bit) ---
+    std::vector<uint64_t> S = pack_pm_to_bits(s_ptr, N);
+    const size_t S_words = S.size();
+
+    // --- Sliding windows: step=8 bits ---
+    const int step = 8;
+    const int n_pos = (N >= static_cast<size_t>(L))
+                      ? static_cast<int>((N - L) / step + 1)
+                      : 0;
+
+    // threshold -> max allowed mismatches
+    const int d_max = static_cast<int>(std::floor((1.0 - thresh) * double(L) * 0.5));
+
+    // --- Find best code per-position ---
+    std::vector<int>  best_idx (std::max(0, n_pos), 0);
+    std::vector<int>  best_dist(std::max(0, n_pos), L);
+    std::vector<char> hit_mask (std::max(0, n_pos), 0);
+
+    auto t_loop0 = clock::now();
+    {
+        py::gil_scoped_release release;
+        for (int pos8 = 0; pos8 < n_pos; ++pos8) {
+            const size_t bitpos = static_cast<size_t>(pos8 * step);
+            // load 64-bit window
+            const size_t idx   = bitpos >> 6;
+            const unsigned sh  = static_cast<unsigned>(bitpos & 63);
+            uint64_t lo = (idx < S_words) ? S[idx] : 0ULL;
+            uint64_t hi = (idx + 1 < S_words) ? S[idx + 1] : 0ULL;
+            const uint64_t win = (sh == 0) ? lo : ((lo >> sh) | (hi << (64 - sh)));
+
+            int best_d = L;
+            int best_k = 0;
+
+            // scan codes
+            for (int k = 0; k < K; ++k) {
+                const uint64_t x = (win ^ codes64[k]);
+#if defined(__GNUC__) || defined(__clang__)
+                const int d = __builtin_popcountll(x);
+#else
+                uint64_t y = x;
+                y = y - ((y >> 1) & 0x5555555555555555ULL);
+                y = (y & 0x3333333333333333ULL) + ((y >> 2) & 0x3333333333333333ULL);
+                const int d = static_cast<int>((((y + (y >> 4)) & 0x0F0F0F0F0F0F0F0FULL) * 0x0101010101010101ULL) >> 56);
+#endif
+                if (d < best_d) { best_d = d; best_k = k; if (best_d == 0) break; }
+            }
+            best_dist[pos8] = best_d;
+            best_idx [pos8] = best_k;
+            hit_mask [pos8] = (best_d <= d_max) ? 1 : 0;
+        }
+    }
+    auto t_loop1 = clock::now();
+
+    // --- Build output bytes and token starts (byte offsets) ---
+    std::string out;
+    out.reserve(N / 8 + 2 * 64);
+
+    std::vector<int64_t> token_starts; // in output byte offsets (for whitelist)
+    token_starts.reserve(128);
+
+    size_t pos_bits = 0;
+    int    pos8     = 0;
+
+    auto emit_byte_from_bits = [&](size_t bit_start){
+        // pack 8 chips_pm bits: MSB-first like numpy.packbits(default)
+        uint8_t v = 0;
+        for (int b = 0; b < 8; ++b) {
+            size_t i = bit_start + static_cast<size_t>(b);
+            int bit = 0;
+            if (i < N && s_ptr[i] > 0) bit = 1;
+            v |= static_cast<uint8_t>(bit) << (7 - b);
+        }
+        out.push_back(static_cast<char>(v));
+    };
+
+    while (pos_bits < N) {
+        if (pos8 < n_pos && hit_mask[pos8]) {
+            // insert token bytes
+            py::bytes py_tok = tokens[best_idx[pos8]].cast<py::bytes>();
+            // get its data
+            std::string tok = py_tok;
+            // record start offset
+            token_starts.push_back(static_cast<int64_t>(out.size()));
+            out.append(tok);
+            // advance by L bits / 8 bytes
+            pos_bits += static_cast<size_t>(L);
+            pos8     += (L / 8);
+        } else {
+            // no hit at this byte-position: emit 1 byte from 8 bits and advance 8
+            if (pos_bits + 8 <= N) {
+                emit_byte_from_bits(pos_bits);
+                pos_bits += 8;
+                pos8     += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    if (return_token_positions) {
+        py::array_t<int64_t> starts_arr(token_starts.size());
+        auto buf = starts_arr.request();
+        std::memcpy(buf.ptr, token_starts.data(), token_starts.size()*sizeof(int64_t));
+        return py::make_tuple(py::bytes(out), starts_arr);
+    } else {
+        return py::bytes(out);
+    }
+}
+
+
 // --------------------------- module ---------------------------
 
 PYBIND11_MODULE(binxcorr, m) {
@@ -397,4 +564,15 @@ PYBIND11_MODULE(binxcorr, m) {
           py::arg("min_corr") = -1.0, py::arg("debug") = false,
           "Sliding correlation on pre-packed uint64 streams. Supports early-exit with min_corr.\n"
           "Returns float array of length (ROI_len - L + 1).");
+
+    m.def("decode_codewords_popcnt64", &decode_codewords_popcnt64,
+        py::arg("chips_pm"),
+        py::arg("tokens"),
+        py::arg("codes_packed"),
+        py::arg("L"),
+        py::arg("thresh"),
+        py::arg("return_token_positions") = false,
+        "Decode marker codewords with packed XOR+POPCNT (step=8). "
+        "Returns bytes, or (bytes, set[int]) if return_token_positions=True.");
+
 }

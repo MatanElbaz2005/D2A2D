@@ -12,7 +12,7 @@ from helpers_files.helpers import _build_marker_codewords_gold, _is_marker_token
 from helpers_files.gui_helpers import _to_bgr, _compose_grid, _label
 from helpers_files.runtime_helpers import _rt_init, _rt_set_frame, _rt_record, _rt_print, _rt_flush_if_ready
 from helpers_files.camera_helpers import open_capture
-from helpers_files.helpers import _encode_len_block_chips, _decode_len_block_chips
+from helpers_files.helpers import _encode_len_block_chips, _decode_len_block_chips, decode_codewords
 import binxcorr
 
 # Frame config
@@ -290,7 +290,11 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     protected_data    = received_pm[data_start:data_end]
     if USE_MARKER_CODEWORDS:
         t = time.time()
-        data_bytes, token_starts = _decode_data_with_codewords_popcnt(protected_data.astype(np.int8, copy=False), _TOKENS, _CODES_PACKED, MARKER_CODEWORD_LEN, MARKER_DET_THRESH, return_token_positions=True)
+        data_dec = decode_codewords(protected_data.astype(np.int8, copy=False),_TOKENS, _CODES_PACKED, MARKER_CODEWORD_LEN, MARKER_DET_THRESH,return_token_positions=True)
+        if isinstance(data_dec, tuple):
+            data_bytes, token_starts = data_dec
+        else:
+            data_bytes, token_starts = data_dec, None
         _rt_print(_RUNTIME, "[DEC] Marker codewords decode took: ", time.time() - t)
     else:
         t = time.time()

@@ -1,4 +1,5 @@
 import numpy as np
+from binxcorr import decode_codewords_popcnt64 as _decode_codewords_cpp
 
 _PM_LUT8 = (np.unpackbits(np.arange(256, dtype=np.uint8).reshape(-1,1), axis=1).astype(np.int8)*2 - 1)  # shape (256,8)
 POPCNT8 = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
@@ -465,3 +466,10 @@ def _decode_len_block_chips(rx_pm: np.ndarray, use_prbs: bool, chip_len: int, pr
     for v in dat_bits: dat = (dat << 1) | int(v)
     return int(hdr), int(dat)
 
+def decode_codewords(chips_pm, tokens, codes_packed, L, thresh, return_token_positions=False):
+    if L == 64:
+        return _decode_codewords_cpp(chips_pm.astype(np.int8, copy=False),tokens,codes_packed.astype(np.uint8, copy=False),int(L),float(thresh),bool(return_token_positions))
+    # fallback: NumPy
+    return _decode_data_with_codewords_popcnt(
+        chips_pm, tokens, codes_packed, L, thresh, return_token_positions=return_token_positions
+)
