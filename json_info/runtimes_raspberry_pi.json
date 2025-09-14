@@ -1244,6 +1244,102 @@
         },
         "OTHER": {}
       }
+    },
+    {
+      "timestamp": "2025-09-14 16:44:13",
+      "os": "raspberry_pi",
+      "frames_used": 10,
+      "frames_window": {
+        "start": 5,
+        "count": 10
+      },
+      "sections": {
+        "GUI": {
+          "[GUI] read slider:": 0.034880638122558594,
+          "[GUI] add noise (analog):": 50.087690353393555,
+          "[GUI] imdecode recovered:": 2.4204015731811523,
+          "[GUI] build labels:": 2.820873260498047,
+          "[GUI] compose mosaic:": 4.077291488647461,
+          "[GUI] imshow:": 32.875990867614746
+        },
+        "ENC": {
+          "[ENC] Marker codewords encode:": 2.258706092834473,
+          "[ENC] build length block:": 0.21250247955322266,
+          "[ENC] Concat full stream:": 0.10957717895507812,
+          "[ENC] build tx_meta:": 0.007009506225585937,
+          "[ENC] Full stream length:": 89130200.0,
+          "[ENC] pack/pad/reshape frame:": 0.4747629165649414,
+          "[ENC] encode_udp_to_frame (outer):": 3.421330451965332
+        },
+        "DEC": {
+          "[DEC] Threshold->±1 took:": 0.41577816009521484,
+          "[DEC] 1×correlate (sync only):": 0.7477521896362305,
+          "[DEC] Marker codewords decode took:": 0.9309053421020508,
+          "[DEC] fix_false_markers took:": 0.8632898330688477,
+          "[DEC] merge_jpeg took:": 0.010037422180175781,
+          "[DEC] decode_frame_to_udp (outer):": 3.4996986389160156
+        },
+        "LOOP": {
+          "[LOOP] cap.read:": 2.545809745788574,
+          "[LOOP] resize:": 1.518559455871582,
+          "[LOOP] imencode:": 2.256608009338379,
+          "[LOOP] split_jpeg:": 0.9711980819702148,
+          "[LOOP] add noise (chips):": 54.15527820587158,
+          "[LOOP] frame total:": 164.86783027648926
+        },
+        "OTHER": {}
+      },
+      "section_totals_ms": {
+        "GUI": 92.31712818145752,
+        "ENC": 3.421330451965332,
+        "DEC": 3.4996986389160156,
+        "LOOP": 61.44745349884033,
+        "OTHER": 0.0
+      },
+      "highlights_block": [
+        "--------------------------------",
+        "[ENC] encode_udp_to_frame (outer): 3.421330451965332 ms",
+        "--------------------------------",
+        "--------------------------------",
+        "[DEC] decode_frame_to_udp (outer): 3.4996986389160156 ms",
+        "--------------------------------"
+      ],
+      "improvements_vs_prev": {
+        "GUI": {
+          "[GUI] read slider:": "-0.00040531 ms (-1.14864865 %)",
+          "[GUI] add noise (analog):": "-4.28849459 ms (-7.88671473 %)",
+          "[GUI] imdecode recovered:": "-0.25191307 ms (-9.42677432 %)",
+          "[GUI] build labels:": "-0.18385649 ms (-6.11890262 %)",
+          "[GUI] compose mosaic:": "0.17366409 ms (4.44878764 %)",
+          "[GUI] imshow:": "13.46120834 ms (69.33483971 %)"
+        },
+        "ENC": {
+          "[ENC] Marker codewords encode:": "-0.13728142 ms (-5.72963829 %)",
+          "[ENC] build length block:": "-0.00851154 ms (-3.85113269 %)",
+          "[ENC] Concat full stream:": "0.03107786 ms (39.58997722 %)",
+          "[ENC] build tx_meta:": "-0.07733107 ms (-91.68904594 %)",
+          "[ENC] Full stream length:": "-66596800.00000000 ms (-42.76509533 %)",
+          "[ENC] pack/pad/reshape frame:": "-0.20586252 ms (-30.24608109 %)",
+          "[ENC] encode_udp_to_frame (outer):": "-1.04085207 ms (-23.32607563 %)"
+        },
+        "DEC": {
+          "[DEC] Threshold->±1 took:": "-0.04645586 ms (-10.05029014 %)",
+          "[DEC] 1×correlate (sync only):": "-0.18351078 ms (-19.70558116 %)",
+          "[DEC] Marker codewords decode took:": "-0.56803226 ms (-37.89565771 %)",
+          "[DEC] fix_false_markers took:": "-0.13556480 ms (-13.57202530 %)",
+          "[DEC] merge_jpeg took:": "-0.00361204 ms (-26.46288210 %)",
+          "[DEC] decode_frame_to_udp (outer):": "-2.77005434 ms (-44.18123568 %)"
+        },
+        "LOOP": {
+          "[LOOP] cap.read:": "0.28494596 ms (12.60341146 %)",
+          "[LOOP] resize:": "-1.45547390 ms (-48.93939394 %)",
+          "[LOOP] imencode:": "0.02316236 ms (1.03706867 %)",
+          "[LOOP] split_jpeg:": "-0.48828125 ms (-33.45585232 %)",
+          "[LOOP] add noise (chips):": "-1.35196447 ms (-2.43565417 %)",
+          "[LOOP] frame total:": "1.12063885 ms (0.68437134 %)"
+        },
+        "OTHER": {}
+      }
     }
   ]
 }

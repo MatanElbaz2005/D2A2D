@@ -54,6 +54,8 @@ GAUSS_NOISE = 50.0
 # Runtime json config
 save_runtime = True
 OS = "raspberry_pi"  # "windows" or "raspberry_pi"
+RUNTIME_START_FRAME = 5
+RUNTIME_NUM_FRAMES  = 10
 
 _RUNTIME = {
     "enabled": False,
@@ -326,7 +328,7 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
 if __name__ == "__main__":
     cv2.setUseOptimized(True)
     cv2.setNumThreads(0)
-    _rt_init(save_runtime, _RUNTIME, OS)
+    _rt_init(save_runtime, _RUNTIME, OS, sample_start=RUNTIME_START_FRAME, sample_count=RUNTIME_NUM_FRAMES)
     cap, fps = open_capture(INPUT_SOURCE, OS, PATH_TO_VIDEO, CAMERA_INDEX, FRAME_WIDTH, FRAME_HEIGHT, TARGET_FPS)
 
     cv2.namedWindow('Monitor', cv2.WINDOW_NORMAL)
@@ -340,6 +342,10 @@ if __name__ == "__main__":
     while cap.isOpened():
         frame_count += 1
         _rt_set_frame(frame_count, _RUNTIME)
+        if RUNTIME_START_FRAME <= frame_count < RUNTIME_START_FRAME + RUNTIME_NUM_FRAMES:
+            _RUNTIME["enabled"] = True
+        else:
+            _RUNTIME["enabled"] = False
         frame_start = time.time()
         t = time.time()
         success, frame = cap.read()

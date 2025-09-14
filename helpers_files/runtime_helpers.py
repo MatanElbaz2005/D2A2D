@@ -16,13 +16,18 @@ def _to_ms_str(seconds: float, places: int = 20) -> str | None:
     except (InvalidOperation, ValueError):
         return None
 
-def _rt_init(save_runtime, _RUNTIME, OS):
+def _rt_init(save_runtime, _RUNTIME, OS, sample_start: int = 2, sample_count: int = 4):
     if not save_runtime:
         return
     _R = _RUNTIME
     _R["enabled"] = True
     _R["collected"] = {}
     _R["flushed"] = False
+
+    _R["sample_start"] = int(sample_start)
+    _R["sample_count"] = int(sample_count)
+    _R["frames_used"] = 0
+
     suffix = "windows" if OS.lower() == "windows" else "raspberry_pi"
     project_root = os.path.dirname(os.path.dirname(__file__))
     base_dir = os.path.join(project_root, "json_info")
@@ -33,17 +38,30 @@ def _rt_init(save_runtime, _RUNTIME, OS):
 
 def _rt_set_frame(idx: int, _RUNTIME):
     _RUNTIME["frame"] = idx
+    _RUNTIME["_marked_this_frame"] = False
 
 def _rt_record(label: str, seconds: float, _RUNTIME):
     if not _RUNTIME.get("enabled"):
         return
-    if 2 <= _RUNTIME.get("frame", 0) <= 5:
-        try:
-            v = float(seconds)
-        except (TypeError, ValueError):
-            return
-        if math.isfinite(v):
-            _RUNTIME["collected"].setdefault(label, []).append(v)
+
+    frame_idx = _RUNTIME.get("frame", 0)
+    start = int(_RUNTIME.get("sample_start", 2))
+    count = int(_RUNTIME.get("sample_count", 4))
+    end   = start + count - 1
+
+    if not (start <= frame_idx <= end):
+        return
+
+    try:
+        v = float(seconds)
+    except (TypeError, ValueError):
+        return
+    if math.isfinite(v):
+        _RUNTIME["collected"].setdefault(label, []).append(v)
+
+        if not _RUNTIME.get("_marked_this_frame", False):
+            _RUNTIME["frames_used"] = int(_RUNTIME.get("frames_used", 0)) + 1
+            _RUNTIME["_marked_this_frame"] = True
 
 def _rt_print(_RUNTIME, label: str, seconds: float, suffix: str = "", extra: str = ""):
     msg = f"{label}{seconds}{suffix}{extra}"
@@ -55,11 +73,17 @@ def _rt_flush_if_ready(_RUNTIME, OS):
         return
     if _RUNTIME.get("flushed"):
         return
-    if _RUNTIME.get("frame", 0) < 5:
+
+    frame_idx = _RUNTIME.get("frame", 0)
+    start = int(_RUNTIME.get("sample_start", 2))
+    count = int(_RUNTIME.get("sample_count", 4))
+    end   = start + count - 1
+
+    if frame_idx < end:
         return
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    frame_idxs = [2, 3, 4, 5]
+    frames_used_count = int(_RUNTIME.get("frames_used", 0))
 
     fn = _RUNTIME["filename"]
     root = None
@@ -161,7 +185,11 @@ def _rt_flush_if_ready(_RUNTIME, OS):
     run_record = {
         "timestamp": now,
         "os": OS,
-        "frames_used": frame_idxs,
+        "frames_used": frames_used_count,
+        "frames_window": {
+            "start": start,
+            "count": count
+        },
         "sections": sections,
         "section_totals_ms": section_totals_ms,
         "highlights_block": highlights_block,
