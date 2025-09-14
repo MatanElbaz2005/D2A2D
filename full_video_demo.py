@@ -410,7 +410,8 @@ if __name__ == "__main__":
         
         # add noise
         t = time.time()
-        noisy = frame.astype(np.float32) + np.random.normal(0.0, sigma, frame.shape).astype(np.float32)
+        noisy = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR).astype(np.float32)
+        noisy += np.random.normal(0.0, sigma, noisy.shape).astype(np.float32)
         noisy = np.clip(noisy, 0, 255).astype(np.uint8)
         _rt_print(_RUNTIME, "[LOOP] add noise (chips): ", time.time()-t, " s")
 
@@ -423,7 +424,8 @@ if __name__ == "__main__":
 
         t = time.time()
         # --- Pre-compute chip-level BER per section ---
-        rx_pm = (2 * (noisy.ravel() > 127).astype(np.int8) - 1)
+        noisy_gray = cv2.cvtColor(noisy, cv2.COLOR_BGR2GRAY)
+        rx_pm = (2 * (noisy_gray.ravel() > 127).astype(np.int8) - 1)
         tx_pm = tx_meta["stream_pm"]; idx = tx_meta["idx"]; L_end = idx["data"][1]
         rx_pm = rx_pm[:L_end]
 
@@ -447,7 +449,7 @@ if __name__ == "__main__":
         try:
             # decode
             t = time.time()
-            decoded_data = decode_frame_to_udp(noisy)
+            decoded_data = decode_frame_to_udp(noisy_gray)
             _rt_print(_RUNTIME, "[DEC] decode_frame_to_udp (outer): ", time.time()-t, " s")
             t = time.time()
             decoded_np = np.frombuffer(decoded_data, dtype=np.uint8)
