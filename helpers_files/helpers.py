@@ -473,3 +473,26 @@ def decode_codewords(chips_pm, tokens, codes_packed, L, thresh, return_token_pos
     return _decode_data_with_codewords_popcnt(
         chips_pm, tokens, codes_packed, L, thresh, return_token_positions=return_token_positions
 )
+
+def _encode_len_block_chips_dataonly(data_len_chips: int,
+                                     use_prbs: bool, chip_len: int, prbs: np.ndarray,
+                                     LENGTH_BITS_PER_FIELD: int) -> np.ndarray:
+    b_dat = _int_to_bits_be(data_len_chips, LENGTH_BITS_PER_FIELD)
+    return _map_bits_to_chips(b_dat, use_prbs, chip_len, prbs)
+
+def _decode_len_block_chips_dataonly(rx_pm: np.ndarray,
+                                     use_prbs: bool, chip_len: int, prbs: np.ndarray,
+                                     LENGTH_BITS_PER_FIELD: int) -> int:
+    if use_prbs:
+        groups = rx_pm.reshape(-1, chip_len)
+        soft = (groups @ prbs) / float(chip_len)
+    else:
+        groups = rx_pm.reshape(-1, 3)
+        patterns = np.array([[-1, 1, -1],[1,-1,1]], dtype=np.int32)
+        corr = groups @ patterns.T
+        soft = (corr[:,1] - corr[:,0]) / 3.0
+    bits01 = (soft > 0).astype(np.uint8)
+    dat = 0
+    for v in bits01[:LENGTH_BITS_PER_FIELD]:
+        dat = (dat << 1) | int(v)
+    return int(dat)

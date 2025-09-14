@@ -12,7 +12,8 @@ from helpers_files.helpers import _build_marker_codewords_gold, _is_marker_token
 from helpers_files.gui_helpers import _to_bgr, _compose_grid, _label
 from helpers_files.runtime_helpers import _rt_init, _rt_set_frame, _rt_record, _rt_print, _rt_flush_if_ready
 from helpers_files.camera_helpers import open_capture
-from helpers_files.helpers import _encode_len_block_chips, _decode_len_block_chips, decode_codewords
+from helpers_files.helpers import _encode_len_block_chips, _decode_len_block_chips, decode_codewords, _encode_len_block_chips_dataonly, _decode_len_block_chips_dataonly
+from key_files.encode import encode_udp_to_frame_dataonly
 import binxcorr
 
 # Frame config
@@ -61,6 +62,9 @@ _RUNTIME = {
     "flushed": False,
     "filename": None
 }
+
+HEADER_TEMPLATE: bytes | None = None
+HEADER_TEMPLATE_READY: bool = False
 
 if USE_MARKER_CODEWORDS:
     codewords_time = time.time()
@@ -229,62 +233,24 @@ def decode_frame_to_udp(frame: np.ndarray, corr_threshold: float = 0.9) -> bytes
     sync_start = int(h_idx)
     sync_end   = sync_start + len(HEADERS_SYNC_PATTERN)
 
-    len_bits_total = 2 * LENGTH_BITS_PER_FIELD
+    len_bits_total = LENGTH_BITS_PER_FIELD
     chips_per_bit  = (LENGTH_CHIP_LENGTH if USE_PRBS_FOR_HEADERS else 3)
     len_block_chips = len_bits_total * chips_per_bit
 
     len_block_rx = received_pm[sync_end: sync_end + len_block_chips]
-    hdr_chips_len, data_chips_len = _decode_len_block_chips(
+    data_chips_len = _decode_len_block_chips_dataonly(
         len_block_rx, USE_PRBS_FOR_HEADERS, LENGTH_CHIP_LENGTH, LENGTH_PRBS if USE_PRBS_FOR_HEADERS else None, LENGTH_BITS_PER_FIELD
     )
 
-    headers_start = sync_end + len_block_chips
-    headers_end   = headers_start + hdr_chips_len
-    data_start    = headers_end
-    data_end      = data_start + data_chips_len
-    
-    if not (headers_start < data_start < data_end):
-        raise ValueError(f"Invalid sync pattern order: headers_start={headers_start}, data_start={data_start}, data_end={data_end}")
-    
-    expected_data_bits = (data_end - data_start) * 8  # Approximate based on pixel range
-    
-    protected_headers = received_pm[headers_start:headers_end]
+    data_start = sync_end + len_block_chips
+    data_end   = data_start + data_chips_len
+    if not (data_start < data_end):
+        raise ValueError(f"Invalid data range: data_start={data_start}, data_end={data_end}")
 
-    t3 = time.time()
-    if USE_PRBS_FOR_HEADERS:
-        # Despread headers
-        n_groups_headers = len(protected_headers) // CHIP_LENGTH_FOR_HEADERS
-        chips_headers = protected_headers[:n_groups_headers * CHIP_LENGTH_FOR_HEADERS].reshape(-1, CHIP_LENGTH_FOR_HEADERS)
-        rx_bits_pm_headers = np.dot(chips_headers, HEADERS_PRBS) / CHIP_LENGTH_FOR_HEADERS
-        rx_bits_headers = ((np.sign(rx_bits_pm_headers) + 1) / 2).astype(np.uint8)
-    else:
-        n_groups = len(protected_headers) // 3
-        chips = protected_headers[:n_groups * 3].reshape(-1, 3)
-        patterns = np.array([[-1, 1, -1], [1, -1, 1]], dtype=np.int32)
-        corr = np.dot(chips, patterns.T) / 3
-        rx_bits_headers = (np.argmax(corr, axis=1)).astype(np.uint8)
-    _rt_print(_RUNTIME, "[DEC] PRBS/map headers took: ", time.time() - t3)
+    if not HEADER_TEMPLATE_READY or HEADER_TEMPLATE is None:
+        raise ValueError("HEADER_TEMPLATE not initialised")
+    decoded_headers = HEADER_TEMPLATE
 
-    t4 = time.time()
-    rx_bytes = np.packbits(rx_bits_headers).tobytes()
-    t5 = time.time()
-    _rt_print(_RUNTIME, "[DEC] packbits headers took: ", t5 - t4)
-
-    if USE_RS_FOR_HEADERS:
-        try:
-            t_rs_headers = time.time()
-            decoded_headers = bytes(rsc.decode(bytearray(rx_bytes))[0])
-            end_t_rs_headers = time.time()
-            _rt_print(_RUNTIME, "[DEC] rs decode for headers time ", end_t_rs_headers - t_rs_headers)
-        except ReedSolomonError as e:
-            raise ValueError(f"Header RS decoding failed: {e}")
-    else:
-        decoded_headers = rx_bytes
-    t6 = time.time()
-    
-    sos_index = decoded_headers.find(b'\xff\xda')
-    if not (decoded_headers.startswith(b'\xff\xd8') and sos_index != -1):
-        raise ValueError(f"Invalid JPEG headers: start={decoded_headers[:2].hex()}, sos_index={sos_index}")
     
     # Despread data
     protected_data    = received_pm[data_start:data_end]
@@ -393,10 +359,33 @@ if __name__ == "__main__":
         t = time.time()
         headers, compressed = split_jpeg(encoded_image.tobytes())
         _rt_print(_RUNTIME, "[LOOP] split_jpeg: ", time.time()-t, " s")
+        if not HEADER_TEMPLATE_READY:
+            HEADER_TEMPLATE = headers
+            HEADER_TEMPLATE_READY = True
+            continue
         
         # encode
         t = time.time()
-        frame, tx_meta = encode_udp_to_frame(headers, compressed)
+        frame, tx_meta = encode_udp_to_frame_dataonly(
+            compressed,
+            USE_RS_FOR_DATA=USE_RS_FOR_DATA,
+            CHUNK_BYTES=CHUNK_BYTES,
+            rsc=rsc,
+            USE_MARKER_CODEWORDS=USE_MARKER_CODEWORDS,
+            TOKENS=_TOKENS,
+            CODES=_CODES,
+            USE_PRBS_FOR_DATA=USE_PRBS_FOR_DATA,
+            CHIP_LENGTH_FOR_DATA=CHIP_LENGTH_FOR_DATA,
+            DATA_PRBS=DATA_PRBS,
+            USE_PRBS_FOR_HEADERS=USE_PRBS_FOR_HEADERS,
+            LENGTH_CHIP_LENGTH=LENGTH_CHIP_LENGTH,
+            LENGTH_PRBS=LENGTH_PRBS,
+            LENGTH_BITS_PER_FIELD=LENGTH_BITS_PER_FIELD,
+            HEADERS_SYNC_PATTERN=HEADERS_SYNC_PATTERN,
+            FRAME_WIDTH=FRAME_WIDTH,
+            FRAME_HEIGHT=FRAME_HEIGHT,
+            _RUNTIME=_RUNTIME
+        )
         _rt_print(_RUNTIME, "[ENC] encode_udp_to_frame (outer): ", time.time()-t, " s")
         
         # save the encoded frame
@@ -429,7 +418,6 @@ if __name__ == "__main__":
         tx_pm = tx_meta["stream_pm"]; idx = tx_meta["idx"]; L_end = idx["data"][1]
         rx_pm = rx_pm[:L_end]
 
-        s,e = idx["hdr"];    err_h  = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_h  = e - s; ber_h  = (err_h/tot_h) if tot_h else 0.0
         s,e = idx["data"];   err_d  = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_d  = e - s; ber_d  = (err_d/tot_d) if tot_d else 0.0
         s,e = idx["sync"];  err_sh = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_sh = e - s
         s,e = idx["len"];   err_sl = int(np.count_nonzero(tx_pm[s:e] != rx_pm[s:e]));  tot_sl = e - s
@@ -438,13 +426,11 @@ if __name__ == "__main__":
         tot_sync = tot_sh + tot_sl
         ber_sync = (err_sync / tot_sync) if tot_sync else 0.0
 
-        err_total  = err_h + err_d + err_sync
-        bits_total = tot_h + tot_d + tot_sync
+        err_total  = err_d + err_sync
+        bits_total = tot_d + tot_sync
         ber_total  = (err_total / bits_total) if bits_total else 0.0
-        _rt_print(_RUNTIME, "[LOOP] compute BER: ", time.time()-t, " s")
 
-        line1 = f"BER stream: {100.0*ber_total:.2f}%  ({err_total}/{bits_total} chips)"
-        line2 = f"H: {100.0*ber_h:.2f}%  D: {100.0*ber_d:.2f}%  Sync: {100.0*ber_sync:.2f}%"
+        line2 = f"D: {100.0*ber_d:.2f}%  Sync: {100.0*ber_sync:.2f}%"
 
         try:
             # decode
@@ -459,9 +445,9 @@ if __name__ == "__main__":
                 # show black recovered frame
                 frame_to_show = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
                 annotated = frame_to_show.copy(); y0 = 22
-                x1 = FRAME_WIDTH - 10 - cv2.getTextSize(line1, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
-                cv2.putText(annotated, line1, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
-                cv2.putText(annotated, line1, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
+                x1 = FRAME_WIDTH - 10 - cv2.getTextSize(line2, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
+                cv2.putText(annotated, line2, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
+                cv2.putText(annotated, line2, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
                 y0 += 20
                 x2 = FRAME_WIDTH - 10 - cv2.getTextSize(line2, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
                 cv2.putText(annotated, line2, (x2, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
@@ -474,9 +460,9 @@ if __name__ == "__main__":
                 frame_to_show = decoded_img
 
                 annotated = frame_to_show.copy(); y0 = 22
-                x1 = FRAME_WIDTH - 10 - cv2.getTextSize(line1, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
-                cv2.putText(annotated, line1, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
-                cv2.putText(annotated, line1, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
+                x1 = FRAME_WIDTH - 10 - cv2.getTextSize(line2, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
+                cv2.putText(annotated, line2, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
+                cv2.putText(annotated, line2, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
                 y0 += 20
                 x2 = FRAME_WIDTH - 10 - cv2.getTextSize(line2, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
                 cv2.putText(annotated, line2, (x2, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
@@ -488,9 +474,9 @@ if __name__ == "__main__":
             # show black recovered frame inside the single-Window mosaic
             frame_to_show = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
             annotated = frame_to_show.copy(); y0 = 22
-            x1 = FRAME_WIDTH - 10 - cv2.getTextSize(line1, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
-            cv2.putText(annotated, line1, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
-            cv2.putText(annotated, line1, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
+            x1 = FRAME_WIDTH - 10 - cv2.getTextSize(line2, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
+            cv2.putText(annotated, line2, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
+            cv2.putText(annotated, line2, (x1, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
             y0 += 20
             x2 = FRAME_WIDTH - 10 - cv2.getTextSize(line2, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0]
             cv2.putText(annotated, line2, (x2, y0), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,0,0), 3, cv2.LINE_AA)
