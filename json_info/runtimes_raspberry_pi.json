@@ -1248,6 +1248,7 @@
     {
       "timestamp": "2025-09-14 16:44:13",
       "os": "raspberry_pi",
+      "whats new?": "removed the headers section from the encoding/decoding process",
       "frames_used": 10,
       "frames_window": {
         "start": 5,
