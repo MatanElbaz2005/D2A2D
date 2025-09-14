@@ -8,3 +8,4 @@ d2a2d/*
 *.whl
 binxcorr.egg-info/
 build/
+*.so
