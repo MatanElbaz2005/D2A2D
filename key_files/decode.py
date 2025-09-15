@@ -12,7 +12,7 @@ import yaml
 from helpers_files.config_helpers import _cfg, get_rsc, get_marker_codebook, get_headers_sync, get_prbs
 from helpers_files.runtime_helpers import _rt_print
 
-def decode_frame_to_udp(frame: np.ndarray, _RUNTIME, HEADER_TEMPLATE_READY, HEADER_TEMPLATE, corr_threshold: float = 0.9) -> bytes:
+def decode_frame_to_udp(frame: np.ndarray, _RUNTIME=None, HEADER_TEMPLATE_READY=False, HEADER_TEMPLATE=None, corr_threshold: float = 0.9) -> bytes:
     cfg = _cfg()
     FRAME_WIDTH  = cfg["frame"]["width"]
     FRAME_HEIGHT = cfg["frame"]["height"]

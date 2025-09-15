@@ -41,6 +41,8 @@ def _rt_set_frame(idx: int, _RUNTIME):
     _RUNTIME["_marked_this_frame"] = False
 
 def _rt_record(label: str, seconds: float, _RUNTIME):
+    if not isinstance(_RUNTIME, dict):
+        return
     if not _RUNTIME.get("enabled"):
         return
 
@@ -66,7 +68,8 @@ def _rt_record(label: str, seconds: float, _RUNTIME):
 def _rt_print(_RUNTIME, label: str, seconds: float, suffix: str = "", extra: str = ""):
     msg = f"{label}{seconds}{suffix}{extra}"
     print(msg)
-    _rt_record(label.strip(), seconds, _RUNTIME)
+    if isinstance(_RUNTIME, dict):
+        _rt_record(label.strip(), seconds, _RUNTIME)
 
 def _rt_flush_if_ready(_RUNTIME, OS):
     if not _RUNTIME.get("enabled"):

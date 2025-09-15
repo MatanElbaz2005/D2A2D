@@ -5,7 +5,7 @@ import time
 from helpers_files.config_helpers import _cfg, get_rsc, get_marker_codebook, get_headers_sync, get_prbs
 
 
-def encode_udp_to_frame_dataonly(data: bytes, *, _RUNTIME: dict) -> tuple[np.ndarray, dict]:
+def encode_udp_to_frame_dataonly(data: bytes, *, _RUNTIME: dict | None = None) -> tuple[np.ndarray, dict]:
     cfg = _cfg()
 
     FRAME_WIDTH  = cfg["frame"]["width"]
