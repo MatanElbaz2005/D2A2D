@@ -15,47 +15,43 @@ from helpers_files.camera_helpers import open_capture
 from helpers_files.helpers import _encode_len_block_chips, _decode_len_block_chips, decode_codewords, _encode_len_block_chips_dataonly, _decode_len_block_chips_dataonly
 from key_files.encode import encode_udp_to_frame_dataonly
 import binxcorr
+import yaml
+from helpers_files.helpers import _cfg
 
-# Frame config
-FRAME_WIDTH = 720
-FRAME_HEIGHT = 480  # NTSC
+cfg = _cfg()
 
-# Reed-Solomon config
-USE_RS_FOR_HEADERS = True
-USE_RS_FOR_DATA = False
-ECC_SYMBOLS = 50
-CHUNK_BYTES = 150
+FRAME_WIDTH  = cfg["frame"]["width"]
+FRAME_HEIGHT = cfg["frame"]["height"]
 
-# PRBS config
-USE_PRBS_FOR_HEADERS = True
-USE_PRBS_FOR_DATA = False
-CHIP_LENGTH_FOR_HEADERS = 3
-CHIP_LENGTH_FOR_DATA = 1
-DATA_PRBS_POLY = [8, 2]
+USE_RS_FOR_HEADERS = cfg["rs"]["use_for_headers"]
+USE_RS_FOR_DATA    = cfg["rs"]["use_for_data"]
+ECC_SYMBOLS        = cfg["rs"]["ecc_symbols"]
+CHUNK_BYTES        = cfg["rs"]["chunk_bytes"]
 
-# Length config
-LENGTH_BITS_PER_FIELD = 32
-LENGTH_CHIP_LENGTH = 7
+USE_PRBS_FOR_HEADERS   = cfg["prbs"]["use_for_headers"]
+USE_PRBS_FOR_DATA      = cfg["prbs"]["use_for_data"]
+CHIP_LENGTH_FOR_HEADERS = cfg["prbs"]["chip_length_for_headers"]
+CHIP_LENGTH_FOR_DATA    = cfg["prbs"]["chip_length_for_data"]
+DATA_PRBS_POLY          = cfg["prbs"]["data_prbs_poly"]
 
-# Marker codewords config
-USE_MARKER_CODEWORDS = True
-MARKER_CODEWORD_LEN = 64
-MARKER_DET_THRESH   = 0.80
+LENGTH_BITS_PER_FIELD = cfg["length"]["bits_per_field"]
+LENGTH_CHIP_LENGTH    = cfg["length"]["chip_length"]
 
-# Camera config
-INPUT_SOURCE = "camera"       # "camera" or "file"
-CAMERA_INDEX = 0            # 0=default webcam
-TARGET_FPS   = 25.0         # desired camera FPS
-PATH_TO_VIDEO = r"/home/matan/Documents/matan/D2A2D/1572378-sd_960_540_24fps.mp4"
+USE_MARKER_CODEWORDS = cfg["markers"]["use"]
+MARKER_CODEWORD_LEN  = cfg["markers"]["codeword_len"]
+MARKER_DET_THRESH    = cfg["markers"]["det_thresh"]
 
-# Noise config
-GAUSS_NOISE = 50.0
+INPUT_SOURCE   = cfg["camera"]["input_source"]
+CAMERA_INDEX   = cfg["camera"]["camera_index"]
+TARGET_FPS     = cfg["camera"]["target_fps"]
+PATH_TO_VIDEO  = cfg["camera"]["path_to_video"]
 
-# Runtime json config
-save_runtime = True
-OS = "raspberry_pi"  # "windows" or "raspberry_pi"
-RUNTIME_START_FRAME = 5
-RUNTIME_NUM_FRAMES  = 10
+GAUSS_NOISE = cfg["noise"]["gauss_noise"]
+
+save_runtime       = cfg["runtime"]["save"]
+OS                 = cfg["runtime"]["os"]
+RUNTIME_START_FRAME = cfg["runtime"]["start_frame"]
+RUNTIME_NUM_FRAMES  = cfg["runtime"]["num_frames"]
 
 _RUNTIME = {
     "enabled": False,
@@ -374,22 +370,12 @@ if __name__ == "__main__":
         t = time.time()
         frame, tx_meta = encode_udp_to_frame_dataonly(
             compressed,
-            USE_RS_FOR_DATA=USE_RS_FOR_DATA,
-            CHUNK_BYTES=CHUNK_BYTES,
             rsc=rsc,
-            USE_MARKER_CODEWORDS=USE_MARKER_CODEWORDS,
             TOKENS=_TOKENS,
             CODES=_CODES,
-            USE_PRBS_FOR_DATA=USE_PRBS_FOR_DATA,
-            CHIP_LENGTH_FOR_DATA=CHIP_LENGTH_FOR_DATA,
-            DATA_PRBS=DATA_PRBS,
-            USE_PRBS_FOR_HEADERS=USE_PRBS_FOR_HEADERS,
-            LENGTH_CHIP_LENGTH=LENGTH_CHIP_LENGTH,
-            LENGTH_PRBS=LENGTH_PRBS,
-            LENGTH_BITS_PER_FIELD=LENGTH_BITS_PER_FIELD,
             HEADERS_SYNC_PATTERN=HEADERS_SYNC_PATTERN,
-            FRAME_WIDTH=FRAME_WIDTH,
-            FRAME_HEIGHT=FRAME_HEIGHT,
+            DATA_PRBS=DATA_PRBS,
+            LENGTH_PRBS=LENGTH_PRBS,
             _RUNTIME=_RUNTIME
         )
         _rt_print(_RUNTIME, "[ENC] encode_udp_to_frame (outer): ", time.time()-t, " s")

@@ -2,29 +2,31 @@ import numpy as np
 from helpers_files.helpers import _encode_len_block_chips_dataonly, _encode_data_with_codewords_fast
 from helpers_files.runtime_helpers import _rt_print
 import time
+from helpers_files.helpers import _cfg
 
 
 def encode_udp_to_frame_dataonly(
     data: bytes,
     *,
-    USE_RS_FOR_DATA: bool,
-    CHUNK_BYTES: int,
     rsc,
-    USE_MARKER_CODEWORDS: bool,
     TOKENS,
     CODES,
-    USE_PRBS_FOR_DATA: bool,
-    CHIP_LENGTH_FOR_DATA: int,
-    DATA_PRBS,
-    USE_PRBS_FOR_HEADERS: bool,
-    LENGTH_CHIP_LENGTH: int,
-    LENGTH_PRBS,
-    LENGTH_BITS_PER_FIELD: int,
     HEADERS_SYNC_PATTERN: np.ndarray,
-    FRAME_WIDTH: int,
-    FRAME_HEIGHT: int,
+    DATA_PRBS,
+    LENGTH_PRBS,
     _RUNTIME: dict
 ) -> tuple[np.ndarray, dict]:
+    cfg = _cfg()
+    USE_RS_FOR_DATA       = cfg["rs"]["use_for_data"]
+    CHUNK_BYTES           = cfg["rs"]["chunk_bytes"]
+    USE_MARKER_CODEWORDS  = cfg["markers"]["use"]
+    USE_PRBS_FOR_DATA     = cfg["prbs"]["use_for_data"]
+    CHIP_LENGTH_FOR_DATA  = cfg["prbs"]["chip_length_for_data"]
+    USE_PRBS_FOR_HEADERS  = cfg["prbs"]["use_for_headers"]
+    LENGTH_CHIP_LENGTH    = cfg["length"]["chip_length"]
+    LENGTH_BITS_PER_FIELD = cfg["length"]["bits_per_field"]
+    FRAME_WIDTH           = cfg["frame"]["width"]
+    FRAME_HEIGHT          = cfg["frame"]["height"]
     if USE_RS_FOR_DATA:
         start_rs_data_encode = time.time()
         coded_blocks = []

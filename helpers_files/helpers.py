@@ -1,5 +1,7 @@
 import numpy as np
 from binxcorr import decode_codewords_popcnt64 as _decode_codewords_cpp
+import yaml
+from functools import lru_cache
 
 _PM_LUT8 = (np.unpackbits(np.arange(256, dtype=np.uint8).reshape(-1,1), axis=1).astype(np.int8)*2 - 1)  # shape (256,8)
 POPCNT8 = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
@@ -496,3 +498,8 @@ def _decode_len_block_chips_dataonly(rx_pm: np.ndarray,
     for v in bits01[:LENGTH_BITS_PER_FIELD]:
         dat = (dat << 1) | int(v)
     return int(dat)
+
+@lru_cache(maxsize=1)
+def _cfg():
+    with open("config.yaml", "r") as f:
+        return yaml.safe_load(f)

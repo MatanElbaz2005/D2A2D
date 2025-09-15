@@ -1,0 +1,49 @@
+# Frame config
+frame:
+  width: 720
+  height: 480  # NTSC
+
+# Reed-Solomon config
+rs:
+  use_for_headers: true
+  use_for_data: false
+  ecc_symbols: 50
+  chunk_bytes: 150
+
+# PRBS config
+prbs:
+  use_for_headers: true
+  use_for_data: false
+  chip_length_for_headers: 3
+  chip_length_for_data: 1
+  data_prbs_poly: [8, 2]
+
+# Length block config
+length:
+  bits_per_field: 32
+  chip_length: 7
+
+# Marker codewords config
+markers:
+  use: true
+  codeword_len: 64
+  det_thresh: 0.80
+
+# Camera / input config
+camera:
+  input_source: camera  # camera or file
+  camera_index: 0
+  target_fps: 25.0
+  path_to_video: "/home/matan/Documents/matan/D2A2D/1572378-sd_960_540_24fps.mp4"
+
+# Noise for demo GUI
+noise:
+  gauss_noise: 50.0
+
+# Runtime collection config
+runtime:
+  save: true
+  os: raspberry_pi  # windows or raspberry_pi
+  start_frame: 5
+  num_frames: 10
+
