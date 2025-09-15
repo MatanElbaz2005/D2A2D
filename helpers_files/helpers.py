@@ -499,7 +499,3 @@ def _decode_len_block_chips_dataonly(rx_pm: np.ndarray,
         dat = (dat << 1) | int(v)
     return int(dat)
 
-@lru_cache(maxsize=1)
-def _cfg():
-    with open("config.yaml", "r") as f:
-        return yaml.safe_load(f)

@@ -16,7 +16,7 @@ from helpers_files.helpers import _encode_len_block_chips, _decode_len_block_chi
 from key_files.encode import encode_udp_to_frame_dataonly
 import binxcorr
 import yaml
-from helpers_files.helpers import _cfg
+from helpers_files.config_helpers import _cfg, get_rsc, get_marker_codebook, get_headers_sync, get_prbs
 
 cfg = _cfg()
 
@@ -66,10 +66,8 @@ HEADER_TEMPLATE_READY: bool = False
 
 if USE_MARKER_CODEWORDS:
     codewords_time = time.time()
-    MARKER_TOKENS = [bytes([0xFF, 0xD0 + i]) for i in range(8)] + [b"\xFF\x00"]
-    _TOKENS, _CODES = _build_marker_codewords_gold(MARKER_CODEWORD_LEN, MARKER_TOKENS)
+    _TOKENS, _CODES = get_marker_codebook()
     _CODES_PACKED = np.packbits((_CODES > 0).astype(np.uint8), axis=1)
-    means = _CODES.mean(axis=1)
 
     norm = (_CODES @ _CODES.T) / _CODES.shape[1]
     for i in range(norm.shape[0]):
@@ -81,11 +79,11 @@ if USE_MARKER_CODEWORDS:
     _rt_print(_RUNTIME, "[ENC] Build marker codewords took: ", time.time() - codewords_time)
 
 perp_rsc_time = time.time()
-rsc = RSCodec(ECC_SYMBOLS)
+rsc = get_rsc()
 _rt_print(_RUNTIME, "[ENC] preper RS took ", time.time() - perp_rsc_time)
 
 # Sync patterns (gold codes, ±1)
-HEADERS_SYNC_PATTERN = gold127(shift=0).astype(np.int8, copy=False)
+HEADERS_SYNC_PATTERN = get_headers_sync()
 
 _HDR_PACK  = np.packbits((HEADERS_SYNC_PATTERN > 0).astype(np.uint8), bitorder="big")
 
@@ -99,16 +97,16 @@ _HDR_MASK = _last_byte_mask(HEADERS_SYNC_PATTERN.size)
 
 # PRBS for spreading (if enabled)
 prbs_headers_time = time.time()
-HEADERS_PRBS = generate_prbs(CHIP_LENGTH_FOR_HEADERS, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_HEADERS else None
+HEADERS_PRBS = get_prbs(CHIP_LENGTH_FOR_HEADERS, tuple(DATA_PRBS_POLY), seed=3) if USE_PRBS_FOR_HEADERS else None
 if USE_PRBS_FOR_HEADERS: _rt_print(_RUNTIME, "[ENC] generate PRBS headers took: ", time.time() - prbs_headers_time)
 
 # PRBS for the length block (longer than headers for extra gain)
 prbs_length_time = time.time()
-LENGTH_PRBS = generate_prbs(LENGTH_CHIP_LENGTH, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_HEADERS else None
+LENGTH_PRBS  = get_prbs(LENGTH_CHIP_LENGTH,     tuple(DATA_PRBS_POLY), seed=3) if USE_PRBS_FOR_HEADERS else None
 if USE_PRBS_FOR_HEADERS: _rt_print(_RUNTIME, "[ENC] generate PRBS length took: ", time.time() - prbs_length_time)
 
 prbs_data_time = time.time()
-DATA_PRBS = generate_prbs(CHIP_LENGTH_FOR_DATA, DATA_PRBS_POLY, 3) if USE_PRBS_FOR_DATA else None
+DATA_PRBS    = get_prbs(CHIP_LENGTH_FOR_DATA,   tuple(DATA_PRBS_POLY), seed=3) if USE_PRBS_FOR_DATA    else None
 if USE_PRBS_FOR_DATA: _rt_print(_RUNTIME, "[ENC] generate PRBS data took: ", time.time() - prbs_data_time)
 
 def encode_udp_to_frame(headers: bytes, data: bytes) -> tuple[np.ndarray, dict]:
@@ -325,7 +323,7 @@ if __name__ == "__main__":
     cv2.setUseOptimized(True)
     cv2.setNumThreads(0)
     _rt_init(save_runtime, _RUNTIME, OS, sample_start=RUNTIME_START_FRAME, sample_count=RUNTIME_NUM_FRAMES)
-    cap, fps = open_capture(INPUT_SOURCE, OS, PATH_TO_VIDEO, CAMERA_INDEX, FRAME_WIDTH, FRAME_HEIGHT, TARGET_FPS)
+    cap, fps = open_capture()
 
     cv2.namedWindow('Monitor', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('Monitor', 2*FRAME_WIDTH + 20, 2*FRAME_HEIGHT + 20)
@@ -368,16 +366,7 @@ if __name__ == "__main__":
         
         # encode
         t = time.time()
-        frame, tx_meta = encode_udp_to_frame_dataonly(
-            compressed,
-            rsc=rsc,
-            TOKENS=_TOKENS,
-            CODES=_CODES,
-            HEADERS_SYNC_PATTERN=HEADERS_SYNC_PATTERN,
-            DATA_PRBS=DATA_PRBS,
-            LENGTH_PRBS=LENGTH_PRBS,
-            _RUNTIME=_RUNTIME
-        )
+        frame, tx_meta = encode_udp_to_frame_dataonly(compressed, _RUNTIME=_RUNTIME)
         _rt_print(_RUNTIME, "[ENC] encode_udp_to_frame (outer): ", time.time()-t, " s")
         
         # save the encoded frame

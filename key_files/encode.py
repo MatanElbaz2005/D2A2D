@@ -2,31 +2,39 @@ import numpy as np
 from helpers_files.helpers import _encode_len_block_chips_dataonly, _encode_data_with_codewords_fast
 from helpers_files.runtime_helpers import _rt_print
 import time
-from helpers_files.helpers import _cfg
+from helpers_files.config_helpers import _cfg, get_rsc, get_marker_codebook, get_headers_sync, get_prbs
 
 
-def encode_udp_to_frame_dataonly(
-    data: bytes,
-    *,
-    rsc,
-    TOKENS,
-    CODES,
-    HEADERS_SYNC_PATTERN: np.ndarray,
-    DATA_PRBS,
-    LENGTH_PRBS,
-    _RUNTIME: dict
-) -> tuple[np.ndarray, dict]:
+def encode_udp_to_frame_dataonly(data: bytes, *, _RUNTIME: dict) -> tuple[np.ndarray, dict]:
     cfg = _cfg()
-    USE_RS_FOR_DATA       = cfg["rs"]["use_for_data"]
-    CHUNK_BYTES           = cfg["rs"]["chunk_bytes"]
-    USE_MARKER_CODEWORDS  = cfg["markers"]["use"]
-    USE_PRBS_FOR_DATA     = cfg["prbs"]["use_for_data"]
-    CHIP_LENGTH_FOR_DATA  = cfg["prbs"]["chip_length_for_data"]
+
+    FRAME_WIDTH  = cfg["frame"]["width"]
+    FRAME_HEIGHT = cfg["frame"]["height"]
+
+    # RS
+    USE_RS_FOR_DATA = cfg["rs"]["use_for_data"]
+    CHUNK_BYTES     = cfg["rs"]["chunk_bytes"]
+    rsc = get_rsc()
+
+    # Markers
+    USE_MARKER_CODEWORDS = cfg["markers"]["use"]
+    TOKENS, CODES = get_marker_codebook()
+
+    # Sync
+    HEADERS_SYNC_PATTERN = get_headers_sync()
+
+    # Length
+    LENGTH_BITS_PER_FIELD = cfg["length"]["bits_per_field"]
     USE_PRBS_FOR_HEADERS  = cfg["prbs"]["use_for_headers"]
     LENGTH_CHIP_LENGTH    = cfg["length"]["chip_length"]
-    LENGTH_BITS_PER_FIELD = cfg["length"]["bits_per_field"]
-    FRAME_WIDTH           = cfg["frame"]["width"]
-    FRAME_HEIGHT          = cfg["frame"]["height"]
+    DATA_PRBS_POLY        = cfg["prbs"]["data_prbs_poly"]
+    LENGTH_PRBS = get_prbs(LENGTH_CHIP_LENGTH, tuple(DATA_PRBS_POLY), seed=3) if USE_PRBS_FOR_HEADERS else None
+
+    # Data PRBS
+    USE_PRBS_FOR_DATA   = cfg["prbs"]["use_for_data"]
+    CHIP_LENGTH_FOR_DATA = cfg["prbs"]["chip_length_for_data"]
+    DATA_PRBS = get_prbs(CHIP_LENGTH_FOR_DATA, tuple(DATA_PRBS_POLY), seed=3) if USE_PRBS_FOR_DATA else None
+
     if USE_RS_FOR_DATA:
         start_rs_data_encode = time.time()
         coded_blocks = []

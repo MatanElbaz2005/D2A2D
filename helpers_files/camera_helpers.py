@@ -1,13 +1,20 @@
 import cv2
 import time
+from helpers_files.config_helpers import _cfg
 
-def open_capture(input_source: str, os_name: str, path: str, cam_index: int, width: int, height: int, target_fps: float):
+def open_capture():
     """
     OpenCV capture opener that supports file or camera with OS-specific backends and fallbacks.
     Returns (cap, fps).
     """
-    input_source = (input_source or "").lower()
-    os_name = (os_name or "").lower()
+    cfg = _cfg()
+    input_source = cfg["camera"]["input_source"].lower()
+    os_name     = cfg["runtime"]["os"].lower()
+    path        = cfg["camera"]["path_to_video"]
+    cam_index   = cfg["camera"]["camera_index"]
+    width       = cfg["frame"]["width"]
+    height      = cfg["frame"]["height"]
+    target_fps  = float(cfg["camera"]["target_fps"])
 
     # Case 1: Video file
     if input_source == "file":
