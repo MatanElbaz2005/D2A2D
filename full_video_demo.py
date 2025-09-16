@@ -173,14 +173,14 @@ if __name__ == "__main__":
         # add noise
         t = time.time()
         noisy = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR).astype(np.float32)
-        noisy += np.random.normal(0.0, sigma, noisy.shape).astype(np.float32)
-        noisy = np.clip(noisy, 0, 255).astype(np.uint8)
+        # noisy += np.random.normal(0.0, sigma, noisy.shape).astype(np.float32)
+        # noisy = np.clip(noisy, 0, 255).astype(np.uint8)
         _rt_print(_RUNTIME, "[LOOP] add noise (chips): ", time.time()-t, " s")
 
         # analog video (for the GUI)
         t = time.time()
         analog_src = frame_proc
-        analog_noisy = analog_src.astype(np.float32) + np.random.normal(0.0, sigma, analog_src.shape).astype(np.float32)
+        analog_noisy = analog_src.astype(np.float32) # + np.random.normal(0.0, sigma, analog_src.shape).astype(np.float32)
         analog_noisy = np.clip(analog_noisy, 0, 255).astype(np.uint8)
         _rt_print(_RUNTIME, "[GUI] add noise (analog): ", time.time()-t, " s")
 
@@ -272,8 +272,7 @@ if __name__ == "__main__":
         _rt_print(_RUNTIME, "[GUI] imshow: ", time.time()-t, " s")
         _rt_print(_RUNTIME, "[LOOP] frame total: ", time.time()-frame_start, " s")
         _rt_flush_if_ready(_RUNTIME, OS)
-        delay_ms = max(1, int(1000.0 / fps - (time.time() - frame_start) * 1000.0))
-        if cv2.waitKey(delay_ms) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     cap.release()
