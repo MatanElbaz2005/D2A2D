@@ -42,7 +42,7 @@ noise:
 
 # Runtime collection config
 runtime:
-  save: true
+  save: false
   os: raspberry_pi  # windows or raspberry_pi
   start_frame: 5
   num_frames: 10

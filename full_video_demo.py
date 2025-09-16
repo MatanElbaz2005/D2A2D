@@ -77,11 +77,11 @@ if USE_MARKER_CODEWORDS:
     print(f"[codewords] L={MARKER_CODEWORD_LEN} (token -> codeword 01)")
     for tok, cw in zip(_TOKENS, _CODES):
         s01 = ''.join('1' if int(v) > 0 else '0' for v in cw.tolist())
-    _rt_print(_RUNTIME, "[ENC] Build marker codewords took: ", time.time() - codewords_time)
+    if save_runtime: _rt_print(_RUNTIME, "[ENC] Build marker codewords took: ", time.time() - codewords_time)
 
 perp_rsc_time = time.time()
 rsc = get_rsc()
-_rt_print(_RUNTIME, "[ENC] preper RS took ", time.time() - perp_rsc_time)
+if save_runtime: _rt_print(_RUNTIME, "[ENC] preper RS took ", time.time() - perp_rsc_time)
 
 # Sync patterns (gold codes, ±1)
 HEADERS_SYNC_PATTERN = get_headers_sync()
@@ -99,16 +99,16 @@ _HDR_MASK = _last_byte_mask(HEADERS_SYNC_PATTERN.size)
 # PRBS for spreading (if enabled)
 prbs_headers_time = time.time()
 HEADERS_PRBS = get_prbs(CHIP_LENGTH_FOR_HEADERS, tuple(DATA_PRBS_POLY), seed=3) if USE_PRBS_FOR_HEADERS else None
-if USE_PRBS_FOR_HEADERS: _rt_print(_RUNTIME, "[ENC] generate PRBS headers took: ", time.time() - prbs_headers_time)
+if USE_PRBS_FOR_HEADERS and save_runtime: _rt_print(_RUNTIME, "[ENC] generate PRBS headers took: ", time.time() - prbs_headers_time)
 
 # PRBS for the length block (longer than headers for extra gain)
 prbs_length_time = time.time()
 LENGTH_PRBS  = get_prbs(LENGTH_CHIP_LENGTH,     tuple(DATA_PRBS_POLY), seed=3) if USE_PRBS_FOR_HEADERS else None
-if USE_PRBS_FOR_HEADERS: _rt_print(_RUNTIME, "[ENC] generate PRBS length took: ", time.time() - prbs_length_time)
+if USE_PRBS_FOR_HEADERS and save_runtime: _rt_print(_RUNTIME, "[ENC] generate PRBS length took: ", time.time() - prbs_length_time)
 
 prbs_data_time = time.time()
 DATA_PRBS    = get_prbs(CHIP_LENGTH_FOR_DATA,   tuple(DATA_PRBS_POLY), seed=3) if USE_PRBS_FOR_DATA    else None
-if USE_PRBS_FOR_DATA: _rt_print(_RUNTIME, "[ENC] generate PRBS data took: ", time.time() - prbs_data_time)
+if USE_PRBS_FOR_DATA and save_runtime: _rt_print(_RUNTIME, "[ENC] generate PRBS data took: ", time.time() - prbs_data_time)
 
 
 if __name__ == "__main__":
@@ -127,30 +127,30 @@ if __name__ == "__main__":
     frame_count = 0
     while cap.isOpened():
         frame_count += 1
-        _rt_set_frame(frame_count, _RUNTIME)
-        if RUNTIME_START_FRAME <= frame_count < RUNTIME_START_FRAME + RUNTIME_NUM_FRAMES:
-            _RUNTIME["enabled"] = True
+        if save_runtime:
+            _rt_set_frame(frame_count, _RUNTIME)
+            _RUNTIME["enabled"] = (RUNTIME_START_FRAME <= frame_count < RUNTIME_START_FRAME + RUNTIME_NUM_FRAMES)
         else:
             _RUNTIME["enabled"] = False
         frame_start = time.time()
         t = time.time()
         success, frame = cap.read()
-        _rt_print(_RUNTIME, "[LOOP] cap.read: ", time.time()-t, " s")
+        if save_runtime: _rt_print(_RUNTIME, "[LOOP] cap.read: ", time.time()-t, " s")
         if not success:
             break
         h, w = frame.shape[:2]
-        print(f"Original: {w}×{h}")
+        # print(f"Original: {w}×{h}")
         
         t = time.time()
         frame_proc = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT), interpolation=cv2.INTER_NEAREST)
-        _rt_print(_RUNTIME, "[LOOP] resize: ", time.time()-t, " s")
+        if save_runtime: _rt_print(_RUNTIME, "[LOOP] resize: ", time.time()-t, " s")
         encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 70, cv2.IMWRITE_JPEG_RST_INTERVAL, 10]
         t = time.time()
         _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
-        _rt_print(_RUNTIME, "[LOOP] imencode: ", time.time()-t, " s")
+        if save_runtime: _rt_print(_RUNTIME, "[LOOP] imencode: ", time.time()-t, " s")
         t = time.time()
         headers, compressed = split_jpeg(encoded_image.tobytes())
-        _rt_print(_RUNTIME, "[LOOP] split_jpeg: ", time.time()-t, " s")
+        if save_runtime: _rt_print(_RUNTIME, "[LOOP] split_jpeg: ", time.time()-t, " s")
         if not HEADER_TEMPLATE_READY:
             HEADER_TEMPLATE = headers
             HEADER_TEMPLATE_READY = True
@@ -159,7 +159,7 @@ if __name__ == "__main__":
         # encode
         t = time.time()
         frame, tx_meta = encode_udp_to_frame_dataonly(compressed, _RUNTIME=_RUNTIME)
-        _rt_print(_RUNTIME, "[ENC] encode_udp_to_frame (outer): ", time.time()-t, " s")
+        if save_runtime: _rt_print(_RUNTIME, "[ENC] encode_udp_to_frame (outer): ", time.time()-t, " s")
         
         # save the encoded frame
         # cv2.imwrite(f"encoded_{frame_count}.png", frame)
@@ -168,21 +168,21 @@ if __name__ == "__main__":
         # read from slider
         t = time.time()
         sigma = float(cv2.getTrackbarPos('Noise', 'Monitor'))
-        _rt_print(_RUNTIME, "[GUI] read slider: ", time.time()-t, " s")
+        if save_runtime: _rt_print(_RUNTIME, "[GUI] read slider: ", time.time()-t, " s")
         
         # add noise
         t = time.time()
         noisy = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR).astype(np.float32)
-        # noisy += np.random.normal(0.0, sigma, noisy.shape).astype(np.float32)
-        # noisy = np.clip(noisy, 0, 255).astype(np.uint8)
-        _rt_print(_RUNTIME, "[LOOP] add noise (chips): ", time.time()-t, " s")
+        noisy += np.random.normal(0.0, sigma, noisy.shape).astype(np.float32)
+        noisy = np.clip(noisy, 0, 255).astype(np.uint8)
+        if save_runtime: _rt_print(_RUNTIME, "[LOOP] add noise (chips): ", time.time()-t, " s")
 
         # analog video (for the GUI)
         t = time.time()
         analog_src = frame_proc
-        analog_noisy = analog_src.astype(np.float32) # + np.random.normal(0.0, sigma, analog_src.shape).astype(np.float32)
+        analog_noisy = analog_src.astype(np.float32) + np.random.normal(0.0, sigma, analog_src.shape).astype(np.float32)
         analog_noisy = np.clip(analog_noisy, 0, 255).astype(np.uint8)
-        _rt_print(_RUNTIME, "[GUI] add noise (analog): ", time.time()-t, " s")
+        if save_runtime: _rt_print(_RUNTIME, "[GUI] add noise (analog): ", time.time()-t, " s")
 
         t = time.time()
         # --- Pre-compute chip-level BER per section ---
@@ -209,11 +209,11 @@ if __name__ == "__main__":
             # decode
             t = time.time()
             decoded_data = decode_frame_to_udp(noisy_gray, _RUNTIME, HEADER_TEMPLATE_READY, HEADER_TEMPLATE)
-            _rt_print(_RUNTIME, "[DEC] decode_frame_to_udp (outer): ", time.time()-t, " s")
+            if save_runtime: _rt_print(_RUNTIME, "[DEC] decode_frame_to_udp (outer): ", time.time()-t, " s")
             t = time.time()
             decoded_np = np.frombuffer(decoded_data, dtype=np.uint8)
             decoded_img = cv2.imdecode(decoded_np, cv2.IMREAD_COLOR)
-            _rt_print(_RUNTIME, "[GUI] imdecode recovered: ", time.time()-t, " s")
+            if save_runtime: _rt_print(_RUNTIME, "[GUI] imdecode recovered: ", time.time()-t, " s")
             if decoded_img is None:
                 # show black recovered frame
                 frame_to_show = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
@@ -261,16 +261,16 @@ if __name__ == "__main__":
         analog_vis = _label(_to_bgr(analog_noisy), 'Analog')
         enc_vis   = _label(_to_bgr(noisy), 'Encoded+Noise')
         rec_vis   = _label(_to_bgr(frame_to_show), 'Recovered')
-        _rt_print(_RUNTIME, "[GUI] build labels: ", time.time()-t, " s")
+        if save_runtime: _rt_print(_RUNTIME, "[GUI] build labels: ", time.time()-t, " s")
 
         t = time.time()
         mosaic = _compose_grid(orig_vis, analog_vis, enc_vis, rec_vis, gap=20)
-        _rt_print(_RUNTIME, "[GUI] compose mosaic: ", time.time()-t, " s")
+        if save_runtime: _rt_print(_RUNTIME, "[GUI] compose mosaic: ", time.time()-t, " s")
 
         t = time.time()
         cv2.imshow('Monitor', mosaic)
-        _rt_print(_RUNTIME, "[GUI] imshow: ", time.time()-t, " s")
-        _rt_print(_RUNTIME, "[LOOP] frame total: ", time.time()-frame_start, " s")
+        if save_runtime: _rt_print(_RUNTIME, "[GUI] imshow: ", time.time()-t, " s")
+        if save_runtime: _rt_print(_RUNTIME, "[LOOP] frame total: ", time.time()-frame_start, " s")
         _rt_flush_if_ready(_RUNTIME, OS)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break

@@ -17,16 +17,20 @@ def _to_ms_str(seconds: float, places: int = 20) -> str | None:
         return None
 
 def _rt_init(save_runtime, _RUNTIME, OS, sample_start: int = 2, sample_count: int = 4):
-    if not save_runtime:
-        return
     _R = _RUNTIME
-    _R["enabled"] = True
+    _R["save_runtime"] = bool(save_runtime)
+    _R["enabled"] = bool(save_runtime)
     _R["collected"] = {}
     _R["flushed"] = False
 
     _R["sample_start"] = int(sample_start)
     _R["sample_count"] = int(sample_count)
     _R["frames_used"] = 0
+
+    if not _R["enabled"]:
+        _R["filename"] = None
+        _R["legacy_fn"] = None
+        return
 
     suffix = "windows" if OS.lower() == "windows" else "raspberry_pi"
     project_root = os.path.dirname(os.path.dirname(__file__))
@@ -66,10 +70,11 @@ def _rt_record(label: str, seconds: float, _RUNTIME):
             _RUNTIME["_marked_this_frame"] = True
 
 def _rt_print(_RUNTIME, label: str, seconds: float, suffix: str = "", extra: str = ""):
+    if not isinstance(_RUNTIME, dict) or not _RUNTIME.get("enabled"):
+        return
     msg = f"{label}{seconds}{suffix}{extra}"
     print(msg)
-    if isinstance(_RUNTIME, dict):
-        _rt_record(label.strip(), seconds, _RUNTIME)
+    _rt_record(label.strip(), seconds, _RUNTIME)
 
 def _rt_flush_if_ready(_RUNTIME, OS):
     if not _RUNTIME.get("enabled"):
@@ -88,7 +93,9 @@ def _rt_flush_if_ready(_RUNTIME, OS):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     frames_used_count = int(_RUNTIME.get("frames_used", 0))
 
-    fn = _RUNTIME["filename"]
+    fn = _RUNTIME.get("filename")
+    if not fn:
+        return
     root = None
     if os.path.exists(fn):
         try:
