@@ -2,7 +2,7 @@ import cv2, time
 
 gst = (
     "libcamerasrc ! "
-    "video/x-raw,format=NV12,width=1536,height=864,framerate=30/1,colorimetry=bt709 ! "
+    "video/x-raw,format=NV12,width=720,height=480,framerate=30/1,colorimetry=bt709 ! "
     "queue max-size-buffers=1 leaky=downstream ! "
     "videoconvert ! "
     "queue max-size-buffers=1 leaky=downstream ! "
