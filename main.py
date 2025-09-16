@@ -22,11 +22,15 @@ cv2.setTrackbarPos("Noise", "Monitor", int(GAUSS_NOISE))
 
 HEADER_TEMPLATE = None
 HEADER_TEMPLATE_READY = False
+BLACK = np.zeros((H, W, 3), dtype=np.uint8)
 
 while cap.isOpened():
     ok, frame = cap.read()
     if not ok:
-        break
+        cv2.imshow("Monitor", BLACK)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+        continue      
 
     frame_proc = cv2.resize(frame, (W, H), interpolation=cv2.INTER_NEAREST)
     _, encoded = cv2.imencode(".jpg", frame_proc, [cv2.IMWRITE_JPEG_QUALITY, 70, cv2.IMWRITE_JPEG_RST_INTERVAL, 10])
@@ -47,13 +51,16 @@ while cap.isOpened():
     noisy = np.clip(noisy, 0, 255).astype(np.uint8)
     noisy_gray = cv2.cvtColor(noisy, cv2.COLOR_BGR2GRAY)
 
-    decoded_data = decode_frame_to_udp(noisy_gray, None, HEADER_TEMPLATE_READY, HEADER_TEMPLATE)
-    decoded_np = np.frombuffer(decoded_data, dtype=np.uint8)
-    rec = cv2.imdecode(decoded_np, cv2.IMREAD_COLOR)
-    if rec is None:
-        rec = np.zeros((H, W, 3), dtype=np.uint8)
-    elif rec.shape[0] != H or rec.shape[1] != W:
-        rec = cv2.resize(rec, (W, H))
+    try:
+        decoded_data = decode_frame_to_udp(noisy_gray, None, HEADER_TEMPLATE_READY, HEADER_TEMPLATE)
+        decoded_np = np.frombuffer(decoded_data, dtype=np.uint8)
+        rec = cv2.imdecode(decoded_np, cv2.IMREAD_COLOR)
+        if rec is None:
+            rec = BLACK
+        elif rec.shape[0] != H or rec.shape[1] != W:
+            rec = cv2.resize(rec, (W, H))
+    except Exception:
+        rec = BLACK  
 
     cv2.imshow("Monitor", rec)
     if cv2.waitKey(1) & 0xFF == ord('q'):
