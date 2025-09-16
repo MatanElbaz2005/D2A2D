@@ -33,10 +33,12 @@ def open_capture():
     elif os_name in ("raspberry_pi", "raspberry"):
         gst_bgr = (
             "libcamerasrc ! "
-            "video/x-raw,format=NV12,width=1536,height=864,framerate=30/1 ! "
+            "video/x-raw,format=NV12,width=1536,height=864,framerate=30/1,colorimetry=bt709 ! "
+            "queue max-size-buffers=1 leaky=downstream ! "
             "videoconvert ! "
-            'video/x-raw,format=BGR ! '
-            "appsink name=appsink drop=true max-buffers=1 sync=false caps=video/x-raw,format=BGR"
+            "queue max-size-buffers=1 leaky=downstream ! "
+            "video/x-raw,format=BGR ! "
+            "appsink enable-last-sample=false drop=true max-buffers=1 sync=false"
         )
         gst_bgrx = (
             "libcamerasrc ! "
@@ -87,9 +89,7 @@ def open_capture():
         if not ok:
             cap.release()
             raise RuntimeError("Camera opened but no frames arrived after BGR and BGRx trials (caps negotiation failed).")
-
-        # libcamera לא תמיד מדווח FPS אמין ל-OpenCV; נחזיר את היעד
-        return cap, float(target_fps)
+        return cap, 0.0
 
     else:
         backends = [cv2.CAP_ANY]
