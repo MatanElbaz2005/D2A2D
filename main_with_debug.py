@@ -144,7 +144,7 @@ if __name__ == "__main__":
         t = time.time()
         frame_proc = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT), interpolation=cv2.INTER_NEAREST)
         if save_runtime: _rt_print(_RUNTIME, "[LOOP] resize: ", time.time()-t, " s")
-        encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 70, cv2.IMWRITE_JPEG_RST_INTERVAL, 10]
+        encode_param = [(cv2.IMWRITE_JPEG_QUALITY), 40, cv2.IMWRITE_JPEG_RST_INTERVAL, 10]
         t = time.time()
         _, encoded_image = cv2.imencode(".jpg", frame_proc, encode_param)
         if save_runtime: _rt_print(_RUNTIME, "[LOOP] imencode: ", time.time()-t, " s")

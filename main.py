@@ -33,7 +33,7 @@ while cap.isOpened():
         continue      
 
     frame_proc = cv2.resize(frame, (W, H), interpolation=cv2.INTER_NEAREST)
-    _, encoded = cv2.imencode(".jpg", frame_proc, [cv2.IMWRITE_JPEG_QUALITY, 70, cv2.IMWRITE_JPEG_RST_INTERVAL, 10])
+    _, encoded = cv2.imencode(".jpg", frame_proc, [cv2.IMWRITE_JPEG_QUALITY, 40, cv2.IMWRITE_JPEG_RST_INTERVAL, 10])
     headers, compressed = split_jpeg(encoded.tobytes())
 
     if not HEADER_TEMPLATE_READY:
